@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import Icon from './Icon.jsx';
 
 export default function Chat({ file, refFile }) {
@@ -12,8 +13,24 @@ export default function Chat({ file, refFile }) {
   ]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [needsKey, setNeedsKey] = useState(false);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
   const streamRef = useRef(null);
   const taRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const stored = await invoke('get_api_key');
+        if (alive && !stored) setNeedsKey(true);
+      } catch (e) {
+        if (alive) setNeedsKey(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     if (streamRef.current) {
@@ -21,9 +38,29 @@ export default function Chat({ file, refFile }) {
     }
   }, [messages, busy]);
 
+  async function saveKey() {
+    const k = keyDraft.trim();
+    if (!k || savingKey) return;
+    setSavingKey(true);
+    try {
+      await invoke('set_api_key', { key: k });
+      setKeyDraft('');
+      setNeedsKey(false);
+    } catch (e) {
+      // Stay in banner state; surface error inline
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        body: '키 저장에 실패했습니다. 다시 시도해 주세요.',
+      }]);
+    } finally {
+      setSavingKey(false);
+    }
+  }
+
   async function send(text) {
     const content = (text ?? draft).trim();
     if (!content || busy) return;
+    if (needsKey) return;
     setDraft('');
     setBusy(true);
 
@@ -31,15 +68,25 @@ export default function Chat({ file, refFile }) {
     setMessages(next);
 
     try {
-      const reply = await window.claude.complete({
+      const reply = await invoke('chat_complete', {
         messages: next.map(m => ({ role: m.role, content: m.body })),
       });
       setMessages([...next, { role: 'assistant', body: reply }]);
     } catch (e) {
-      setMessages([...next, {
-        role: 'assistant',
-        body: '응답을 받아오지 못했습니다. 잠시 후 다시 시도해 주세요.',
-      }]);
+      const kind = e && typeof e === 'object' ? e.kind : null;
+      if (kind === 'NoApiKey' || kind === 'Unauthorized') {
+        setNeedsKey(true);
+        const note = kind === 'Unauthorized'
+          ? 'API 키가 거부되었습니다. 새 키를 입력해 주세요.'
+          : 'API 키가 필요합니다. 아래에 키를 입력해 주세요.';
+        setMessages([...next, { role: 'assistant', body: note }]);
+      } else {
+        const detail = e && typeof e === 'object' && e.message ? `: ${e.message}` : '';
+        setMessages([...next, {
+          role: 'assistant',
+          body: `응답을 받아오지 못했습니다${detail}.`,
+        }]);
+      }
     } finally {
       setBusy(false);
     }
@@ -71,6 +118,37 @@ export default function Chat({ file, refFile }) {
         </div>
       </div>
 
+      {needsKey && (
+        <div className="api-key-banner">
+          <div className="api-key-banner-title">Anthropic API 키 설정</div>
+          <div className="api-key-banner-sub">
+            채팅을 사용하려면 API 키가 필요합니다. console.anthropic.com 에서 발급한 키를 입력하세요. 키는 이 기기에만 저장됩니다.
+          </div>
+          <div className="api-key-banner-row">
+            <input
+              type="password"
+              placeholder="sk-ant-..."
+              value={keyDraft}
+              disabled={savingKey}
+              onChange={(e) => setKeyDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  saveKey();
+                }
+              }}
+            />
+            <button
+              className="btn primary"
+              onClick={saveKey}
+              disabled={savingKey || !keyDraft.trim()}
+            >
+              저장
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="chat-stream" ref={streamRef}>
         {messages.map((m, i) => (
           <div className={`msg ${m.role}`} key={i}>
@@ -89,7 +167,7 @@ export default function Chat({ file, refFile }) {
         )}
       </div>
 
-      {messages.length <= 1 && !busy && (
+      {messages.length <= 1 && !busy && !needsKey && (
         <div className="suggestions">
           {suggestions.map((s, i) => (
             <button key={i} className="suggest" onClick={() => send(s.t + ': ' + s.s)}>
@@ -104,9 +182,9 @@ export default function Chat({ file, refFile }) {
         <div className="chat-input-box">
           <textarea
             ref={taRef}
-            placeholder="AI에게 무엇이든 물어보세요"
+            placeholder={needsKey ? 'API 키를 먼저 설정하세요' : 'AI에게 무엇이든 물어보세요'}
             value={draft}
-            disabled={busy}
+            disabled={busy || needsKey}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -117,7 +195,7 @@ export default function Chat({ file, refFile }) {
           />
           <div className="chat-input-row">
             <span className="hint">Enter 보내기 · Shift+Enter 줄바꿈</span>
-            <button className="send-btn" onClick={() => send()} disabled={busy || !draft.trim()}>
+            <button className="send-btn" onClick={() => send()} disabled={busy || needsKey || !draft.trim()}>
               <Icon name="send" size={14} />
             </button>
           </div>

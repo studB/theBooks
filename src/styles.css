@@ -78,6 +78,44 @@ button { font-family: inherit; }
 }
 .icon-btn:hover { background: var(--gray-100); color: var(--fg-primary); }
 
+.api-key-banner {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--warning-200, var(--gray-200));
+  background: var(--warning-50, var(--gray-50));
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.api-key-banner-title {
+  font-weight: 600;
+  color: var(--fg-primary);
+  font-size: 13px;
+}
+.api-key-banner-sub {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.api-key-banner-row {
+  display: flex;
+  gap: 8px;
+}
+.api-key-banner-row input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--bg-primary, #fff);
+  font-size: 13px;
+  font-family: inherit;
+}
+.api-key-banner-row input:focus {
+  outline: none;
+  border-color: var(--info-400, var(--gray-400));
+}
+
 .chat-stream {
   flex: 1;
   overflow-y: auto;

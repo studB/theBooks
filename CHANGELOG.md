@@ -4,6 +4,7 @@ All notable changes to this project are recorded here. Newest entries on top.
 
 | Version | Date | Type | Summary |
 |---------|------|------|---------|
+| 0.6.0 | 2026-05-16 | feat | Claude API 연결 — Rust 사이드 브릿지 + 인라인 키 입력으로 채팅 실제 동작 |
 | 0.5.0 | 2026-05-16 | feat | 채팅 사이드바 + split 레퍼런스 패널 UI 포팅 (front-assets 3/3) |
 | 0.4.0 | 2026-05-16 | feat | 에디터 + 자동 저장 + 페이지 레이아웃 UI 포팅 (front-assets 2/3) |
 | 0.3.0 | 2026-05-16 | feat | 디자인 토큰 + 워크스페이스/폴더 탐색 UI 포팅 (front-assets 1/3) |

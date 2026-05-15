@@ -1,7 +1,5 @@
+import AppShell from './components/AppShell.jsx';
+
 export default function App() {
-  return (
-    <main>
-      <h1>Hello, theBooks</h1>
-    </main>
-  );
+  return <AppShell />;
 }

@@ -1,4 +1,4 @@
-- [ ] applied
+- [x] applied
 
 # front-assets 포팅 1단계 — 디자인 토큰 + 워크스페이스 브라우징
 

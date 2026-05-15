@@ -1,4 +1,4 @@
-- [ ] applied
+- [x] applied
 
 # front-assets 포팅 3단계 — 채팅 사이드바 + 레퍼런스 패널
 

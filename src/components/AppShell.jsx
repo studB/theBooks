@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import FileList from './FileList.jsx';
 import FolderPickerDialog from './FolderPickerDialog.jsx';
+import Editor from './Editor.jsx';
+import Chat from './Chat.jsx';
+import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 
 const STORAGE_KEY = 'thebooks.v4.items';
 const WORKSPACE_KEY = 'thebooks.v4.workspace';
@@ -87,40 +90,6 @@ function newFolder(parent, name = '새 폴더') {
   };
 }
 
-// Placeholder stubs — real components arrive in plan 2 (editor) and plan 3 (chat / reference)
-function EditorStub({ file, onExit }) {
-  return (
-    <main className="main">
-      <div className="topbar">
-        <button className="topbar-back" onClick={onExit}>← 목록으로</button>
-        <div className="topbar-title" style={{ pointerEvents: 'none' }}>{file.name || '제목 없음'}</div>
-        <div className="topbar-spacer"></div>
-        <span className="save-status">에디터는 다음 단계에 추가됩니다</span>
-      </div>
-      <div className="empty-workspace">
-        <div className="empty-title">에디터 준비 중</div>
-        <div className="empty-sub">이 화면은 plan 2에서 실제 편집기로 교체됩니다.</div>
-      </div>
-    </main>
-  );
-}
-
-function ChatStub() {
-  return (
-    <aside className="chat">
-      <div className="chat-head">
-        <div className="chat-head-title"><span className="dot"></span>대화 (준비 중)</div>
-      </div>
-      <div className="chat-stream">
-        <div className="msg assistant">
-          <div className="msg-role">SYSTEM</div>
-          <div className="msg-body">채팅 패널은 plan 3에서 활성화됩니다.</div>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
 export default function AppShell() {
   const [items, setItems] = useState(loadItems);
   const [workspaceId, setWorkspaceIdInner] = useState(() => {
@@ -129,6 +98,8 @@ export default function AppShell() {
   });
   const [currentFolderId, setCurrentFolderId] = useState(workspaceId);
   const [openFileId, setOpenFileId] = useState(null);
+  const [splitFileId, setSplitFileId] = useState(null);
+  const [splitWidth, setSplitWidth] = useState(420);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   function setWorkspaceId(id) {
@@ -155,6 +126,28 @@ export default function AppShell() {
   }, [items, currentFolderId, workspaceId]);
 
   const openFile = openFileId ? items.find(x => x.id === openFileId) : null;
+  const splitFile = splitFileId ? items.find(x => x.id === splitFileId) : null;
+  useEffect(() => {
+    if (splitFileId && !splitFile) setSplitFileId(null);
+  }, [splitFileId, splitFile]);
+
+  const editorBreadcrumb = useMemo(() => {
+    if (!openFile) return [];
+    const trail = [];
+    let id = openFile.parent;
+    while (id) {
+      const f = items.find(x => x.id === id);
+      if (!f) break;
+      trail.unshift(f.name);
+      if (id === workspaceId) break;
+      id = f.parent;
+    }
+    return trail;
+  }, [items, openFile, workspaceId]);
+
+  function updateFile(id, patch) {
+    setItems(its => its.map(it => it.id === id ? { ...it, ...patch, updatedAt: Date.now() } : it));
+  }
 
   function rename(id, name) {
     setItems(its => its.map(it => it.id === id ? { ...it, name, updatedAt: Date.now() } : it));
@@ -168,6 +161,7 @@ export default function AppShell() {
     collect(id);
     setItems(its => its.filter(it => !toDelete.has(it.id)));
     if (openFileId && toDelete.has(openFileId)) setOpenFileId(null);
+    if (splitFileId && toDelete.has(splitFileId)) setSplitFileId(null);
     if (toDelete.has(workspaceId)) {
       setWorkspaceIdInner(null);
       saveWorkspace(null);
@@ -193,11 +187,45 @@ export default function AppShell() {
   }
 
   return (
-    <div className={`app ${openFile ? 'with-chat' : ''}`}>
+    <div
+      className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''}`}
+      style={splitFileId ? { '--split-width': splitWidth + 'px' } : null}
+    >
       {openFile ? (
         <>
-          <EditorStub file={openFile} onExit={() => setOpenFileId(null)} />
-          <ChatStub />
+          {splitFile && (
+            <>
+              <ReferencePane
+                file={splitFile}
+                items={items}
+                workspaceId={workspaceId}
+                splitWidth={splitWidth}
+                onClose={() => setSplitFileId(null)}
+                onSwap={() => {
+                  setOpenFileId(splitFileId);
+                  setSplitFileId(openFileId);
+                }}
+                onChangeFile={(id) => setSplitFileId(id)}
+              />
+              <SplitDivider onDrag={(deltaX) => {
+                setSplitWidth(w => Math.max(280, Math.min(window.innerWidth * 0.55, w + deltaX)));
+              }} />
+            </>
+          )}
+          <Editor
+            key={openFile.id}
+            file={openFile}
+            breadcrumb={editorBreadcrumb}
+            items={items}
+            workspaceId={workspaceId}
+            splitFileId={splitFileId}
+            onOpenSplit={(id) => setSplitFileId(id)}
+            onCloseSplit={() => setSplitFileId(null)}
+            onChange={(patch) => updateFile(openFile.id, patch)}
+            onSaveNow={(patch) => updateFile(openFile.id, patch)}
+            onExit={() => { setSplitFileId(null); setOpenFileId(null); }}
+          />
+          <Chat file={openFile} refFile={splitFile} />
         </>
       ) : (
         <FileList

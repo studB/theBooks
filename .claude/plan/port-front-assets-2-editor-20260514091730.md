@@ -1,4 +1,4 @@
-- [ ] applied
+- [x] applied
 
 # front-assets 포팅 2단계 — 에디터
 

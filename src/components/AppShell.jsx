@@ -58,7 +58,6 @@ export default function AppShell() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
   const autoSyncedRef = useRef(false);
-  const saveQueue = useRef(new Map());
 
   const workspaceKind = workspacePath
     ? (workspacePath.startsWith('s3://') ? 's3' : 'local')
@@ -288,33 +287,27 @@ export default function AppShell() {
     }
   }
 
-  function scheduleWrite(id, patch) {
-    const existing = saveQueue.current.get(id);
-    if (existing) clearTimeout(existing.timer);
+  async function writeNow(id, patch) {
     const it = items.find(x => x.id === id);
     if (!it) return;
     const title = patch.name !== undefined ? patch.name : it.name;
     const content = patch.content !== undefined ? patch.content : (it.content || '');
     const margins = patch.margins !== undefined ? patch.margins : (it.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
     const createdAt = it.createdAt || Date.now();
-    const timer = setTimeout(async () => {
-      saveQueue.current.delete(id);
-      try {
-        await invoke('write_file', {
-          args: { relPath: id, content, margins, title, createdAt },
-        });
-      } catch (e) {
-        setLoadError('저장 실패: ' + (e?.message || String(e)));
-      }
-    }, 500);
-    saveQueue.current.set(id, { timer });
+    try {
+      await invoke('write_file', {
+        args: { relPath: id, content, margins, title, createdAt },
+      });
+    } catch (e) {
+      setLoadError('저장 실패: ' + (e?.message || String(e)));
+    }
   }
 
   function updateFile(id, patch) {
     setItems(its => its.map(it => it.id === id
       ? { ...it, ...patch, updatedAt: Date.now() }
       : it));
-    scheduleWrite(id, patch);
+    writeNow(id, patch);
   }
 
   async function rename(id, name) {
@@ -363,6 +356,26 @@ export default function AppShell() {
       await refresh();
     } catch (e) {
       setLoadError('폴더 생성 실패: ' + (e?.message || String(e)));
+    }
+  }
+  async function handleImportHwp() {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: '한글 문서', extensions: ['hwpx', 'hwp'] }],
+      });
+      if (!picked) return;
+      const srcPath = typeof picked === 'string' ? picked : picked.path;
+      const res = await invoke('import_hwp', { srcPath });
+      await refresh();
+      if (res?.relPath) {
+        setOpenFileId(res.relPath);
+        await ensureContent(res.relPath);
+      }
+    } catch (e) {
+      const msg = e?.message || e?.kind || (typeof e === 'string' ? e : JSON.stringify(e));
+      setLoadError('HWP 가져오기 실패: ' + msg);
     }
   }
 
@@ -428,6 +441,7 @@ export default function AppShell() {
           onOpenFile={(id) => openFileById(id)}
           onNewFile={handleNewFile}
           onNewFolder={handleNewFolder}
+          onImportHwp={handleImportHwp}
           onDelete={deleteItem}
           onRename={rename}
           syncing={syncing}

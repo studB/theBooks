@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::chat::{load_config, save_config, S3WorkspaceConfig};
+use crate::format;
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", content = "message")]
@@ -91,7 +92,7 @@ pub(crate) fn s3_cache_root(app: &AppHandle, s3: &S3WorkspaceConfig) -> Result<P
     Ok(cache)
 }
 
-fn workspace_root(app: &AppHandle) -> Result<PathBuf, FsError> {
+pub(crate) fn workspace_root(app: &AppHandle) -> Result<PathBuf, FsError> {
     let cfg = load_config(app).map_err(|e| FsError::Io(format!("config: {:?}", e)))?;
     if let Some(s3) = cfg.s3_workspace.as_ref() {
         return s3_cache_root(app, s3);
@@ -550,6 +551,7 @@ pub fn rename_item(app: AppHandle, args: RenameArgs) -> Result<RenamedItem, FsEr
         }
     }
     let id = to_rel_id(&root, &new_full).ok_or_else(|| FsError::Io("id".into()))?;
+    let _ = format::rename_path(&root, &args.rel_path, &id);
     Ok(RenamedItem { id })
 }
 
@@ -561,6 +563,7 @@ pub fn delete_item(app: AppHandle, rel_path: String) -> Result<(), FsError> {
         return Err(FsError::Io(format!("not found: {}", full.display())));
     }
     trash::delete(&full).map_err(|e| FsError::Trash(e.to_string()))?;
+    let _ = format::remove_path(&root, &rel_path);
     Ok(())
 }
 
@@ -590,6 +593,9 @@ pub fn set_workspace(app: AppHandle, path: Option<String>) -> Result<(), FsError
         cfg.s3_workspace = None;
     }
     save_config(&app, &cfg).map_err(|e| FsError::Io(format!("config: {:?}", e)))?;
+    if let Ok(root) = workspace_root(&app) {
+        let _ = format::ensure_books_dir(&root);
+    }
     Ok(())
 }
 

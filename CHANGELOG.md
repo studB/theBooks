@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. Newest entries on top.
 
 | Version | Date | Type | Summary |
 |---------|------|------|---------|
+| 0.10.0 | 2026-05-16 | feat | HWPX 텍스트 임포트 + 문서별 글꼴·글자크기·자간·행간 컨트롤 추가 |
+| 0.9.2 | 2026-05-16 | fix | 한글 IME 조합 깨짐 수정 + 스크롤·키 입력 핫패스에서 React 재렌더 제거 |
+| 0.9.1 | 2026-05-16 | perf | 에디터 후속 최적화 — ResizeObserver/rAF/SplitButton 메모화, 저장 디바운스 중복 제거 |
+| 0.9.0 | 2026-05-16 | feat | 페이지네이션 제거 — A4 너비 단일 스크롤로 전환, 자동저장 토글(기본 OFF) 추가, 룰러/저장 상태 최적화 |
 | 0.8.0 | 2026-05-16 | feat | S3 버킷을 워크스페이스로 사용 가능 — 자동 1회 pull + 수동 양방향 sync 버튼 |
 | 0.7.1 | 2026-05-16 | fix | `.md` 외 텍스트 파일도 열·편집 가능, 바이너리 경고 처리. 에디터 본문이 빈 채 고정되던 버그 수정 |
 | 0.7.0 | 2026-05-16 | feat | localStorage 제거 — OS 폴더 워크스페이스로 전환, frontmatter 마크다운으로 디스크 저장, 휴지통 삭제 |

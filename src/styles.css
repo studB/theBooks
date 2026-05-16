@@ -300,26 +300,52 @@ button { font-family: inherit; }
 }
 .save-status.saving .pulse { background: var(--warning-500); }
 .save-status.saved .pulse { background: var(--success-500); }
+.save-status.dirty { color: var(--fg-primary); font-weight: 600; }
+.save-status.dirty .pulse {
+  background: var(--warning-500);
+  animation: dirty-pulse 1.4s ease-in-out infinite;
+}
+@keyframes dirty-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
 
-/* Page counter (current / total) in topbar */
-.page-counter {
+/* Autosave toggle in topbar */
+.autosave-toggle {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid var(--gray-200);
+  background: var(--white);
+  font: var(--caption);
+  font-weight: 600;
+  color: var(--fg-secondary);
+  cursor: pointer;
   display: inline-flex;
-  align-items: baseline;
-  gap: 2px;
-  padding: 4px 10px;
-  background: var(--gray-50);
-  border: 1px solid var(--gray-100);
-  border-radius: 6px;
-  font-variant-numeric: tabular-nums;
-  font: var(--text-xxs);
-  color: var(--fg-muted);
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
-.page-counter-cur {
-  color: var(--fg-primary);
-  font-weight: 700;
+.autosave-toggle:hover { background: var(--gray-50); }
+.autosave-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--gray-300);
 }
-.page-counter-sep { color: var(--gray-300); padding: 0 2px; }
-.page-counter-total { color: var(--fg-secondary); font-weight: 500; }
+.autosave-toggle.on { color: var(--fg-primary); border-color: var(--gray-300); }
+.autosave-toggle.on .autosave-dot { background: var(--success-500); }
+.autosave-toggle.off .autosave-dot { background: var(--gray-300); }
+
+/* Manual-save button emphasis when unsaved changes exist */
+.btn.primary.urgent {
+  animation: urgent-pulse 1.8s ease-in-out infinite;
+}
+@keyframes urgent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(21, 112, 239, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(21, 112, 239, 0); }
+}
 
 .btn {
   height: 32px;
@@ -558,6 +584,11 @@ button { font-family: inherit; }
 }
 .ruler-h { border-bottom: 1px solid var(--gray-100); }
 .ruler-v { border-right: 1px solid var(--gray-100); }
+.ruler-inner {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
 
 .editor-scroll {
   overflow: auto;
@@ -569,53 +600,33 @@ button { font-family: inherit; }
   justify-content: center;
 }
 
-/* A4 paper — 210x297mm @ 96dpi → 794x1123 px */
-
-/* Multi-page stack: holds visual sheets + a single editable layer on top */
+/* A4 paper — 210x297mm @ 96dpi → 794x1123 px (width fixed, height grows with content) */
 .page-stack {
   width: 794px;
   position: relative;
+  min-height: 1123px;
 }
-
 .page-sheet {
   position: absolute;
-  left: 0;
-  right: 0;
+  inset: 0;
   background: white;
   box-shadow: var(--shadow-md);
   pointer-events: none;
+  z-index: 1;
 }
-.page-sheet-number {
-  position: absolute;
-  bottom: 14px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font: 10px/1 var(--font-sans);
-  color: var(--gray-300);
-  letter-spacing: 0.06em;
-  user-select: none;
-}
-
-.page {
-  background: white;
-  width: 794px;
-  min-height: 1123px;
-  box-shadow: var(--shadow-md);
-  position: relative;
-  padding: 0;
-}
-
 .page-content {
+  position: relative;
+  z-index: 2;
   outline: none;
-  font: 14px/1.8 'CommerceSans', 'Noto Serif KR', serif;
+  font-family: var(--editor-font-family, 'CommerceSans', 'Noto Serif KR', serif);
+  font-size: var(--editor-font-size, 16px);
+  line-height: var(--editor-line-height, 1.8);
+  letter-spacing: var(--editor-letter-spacing, 0px);
   color: var(--gray-700);
   word-break: break-word;
   white-space: pre-wrap;
-  position: absolute;
-  inset: 0;
-  z-index: 2;
   background: transparent;
+  min-height: 1123px;
 }
 .page-content:empty::before {
   content: attr(data-placeholder);
@@ -1263,4 +1274,64 @@ button { font-family: inherit; }
 }
 .btn.split-active:hover {
   background: rgba(21, 112, 239, 0.14);
+}
+
+/* Format controls (topbar) */
+.format-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--gray-200);
+  white-space: nowrap;
+}
+.format-controls .fmt-select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  background: var(--bg-default, #fff);
+  color: var(--fg-primary);
+  font-size: 12px;
+  max-width: 130px;
+}
+.format-controls .fmt-select:focus {
+  outline: none;
+  border-color: var(--gray-300);
+}
+.format-controls .fmt-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--gray-200);
+  border-radius: 4px;
+  background: var(--bg-default, #fff);
+}
+.format-controls .fmt-stepper:focus-within {
+  border-color: var(--gray-300);
+}
+.format-controls .fmt-icon {
+  font-size: 11px;
+  color: var(--fg-disabled);
+  line-height: 1;
+  user-select: none;
+}
+.format-controls .fmt-stepper input {
+  width: 48px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--fg-primary);
+  text-align: right;
+  padding: 0;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.format-controls .fmt-stepper input::-webkit-outer-spin-button,
+.format-controls .fmt-stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }

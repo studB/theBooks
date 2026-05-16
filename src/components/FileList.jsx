@@ -60,7 +60,7 @@ export default function FileList({
   items, workspaceId, workspaceName, workspacePath, workspaceKind, currentFolderId, breadcrumb,
   onEnter, onOpenFile, onUp, onJumpToWorkspace, onJumpTo,
   onOpenWorkspaceDialog,
-  onNewFile, onNewFolder, onDelete, onRename,
+  onNewFile, onNewFolder, onImportHwp, onDelete, onRename,
   syncing, syncMessage, onSync,
 }) {
   const [query, setQuery] = useState('');
@@ -155,6 +155,11 @@ export default function FileList({
         )}
         {!noWorkspace && (
           <>
+            {onImportHwp && (
+              <button className="btn ghost" onClick={onImportHwp} title="HWPX 파일을 텍스트로 가져와 새 글로 저장합니다">
+                <Icon name="file" size={14}/>HWP 가져오기
+              </button>
+            )}
             <button className="btn ghost" onClick={onNewFolder}>
               <Icon name="folderPlus" size={14}/>새 폴더
             </button>

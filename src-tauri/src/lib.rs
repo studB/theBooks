@@ -1,5 +1,7 @@
 mod chat;
+mod format;
 mod fs;
+mod hwp;
 mod s3;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -29,6 +31,11 @@ pub fn run() {
             fs::set_workspace,
             fs::migrate_from_local,
             fs::is_migrated_v4_local,
+            format::get_format,
+            format::set_format,
+            format::remove_format,
+            format::get_default_format,
+            hwp::import_hwp,
             s3::sync_workspace,
             s3::set_s3_workspace,
             s3::get_s3_workspace,

@@ -1,6 +1,6 @@
 [package]
 name = "thebooks"
-version = "0.8.0"
+version = "0.10.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -32,4 +32,6 @@ blake3 = "1"
 walkdir = "2"
 filetime = "0.2"
 tokio = { version = "1", features = ["fs", "io-util"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.36"
 

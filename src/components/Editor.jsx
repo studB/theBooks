@@ -1,12 +1,47 @@
-import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import Icon from './Icon.jsx';
 import { timeAgo } from './FileList.jsx';
 
 const PX_PER_CM = 37.795;
 const PAGE_W_CM = 21;
 const PAGE_H_CM = 29.7;
-const PAGE_H_PX = PAGE_H_CM * PX_PER_CM;
-const PAGE_GAP = 28;
+const AUTOSAVE_KEY = 'thebooks.autosave';
+
+const DEFAULT_FMT = {
+  fontFamily: 'system',
+  fontSize: 16,
+  letterSpacing: 0,
+  lineHeight: 1.7,
+};
+
+const FONT_OPTIONS = [
+  { value: 'system', label: '시스템 기본', stack: 'system-ui, -apple-system, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif' },
+  { value: 'pretendard', label: 'Pretendard', stack: 'Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif' },
+  { value: 'noto-sans-kr', label: 'Noto Sans KR', stack: '"Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif' },
+  { value: 'noto-serif-kr', label: 'Noto Serif KR', stack: '"Noto Serif KR", "Apple SD Gothic Myungjo", "본명조", serif' },
+  { value: 'nanum-gothic', label: '나눔고딕', stack: '"NanumGothic", "Nanum Gothic", "Apple SD Gothic Neo", sans-serif' },
+  { value: 'nanum-myeongjo', label: '나눔명조', stack: '"NanumMyeongjo", "Nanum Myeongjo", serif' },
+  { value: 'malgun-gothic', label: '맑은 고딕', stack: '"Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", sans-serif' },
+];
+
+function fontStackFor(value) {
+  const f = FONT_OPTIONS.find(o => o.value === value);
+  return f ? f.stack : FONT_OPTIONS[0].stack;
+}
+
+function clamp(n, lo, hi) {
+  if (Number.isNaN(n)) return lo;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function readAutosavePref() {
+  try { return localStorage.getItem(AUTOSAVE_KEY) === 'on'; }
+  catch { return false; }
+}
+function writeAutosavePref(on) {
+  try { localStorage.setItem(AUTOSAVE_KEY, on ? 'on' : 'off'); } catch {}
+}
 
 export default function Editor({
   file,
@@ -22,132 +57,233 @@ export default function Editor({
 }) {
   const [title, setTitle] = useState(file.name || '');
   const [margins, setMargins] = useState(file.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
-  const [content, setContent] = useState(file.content || '');
   const [savedAt, setSavedAt] = useState(file.updatedAt);
   const [saving, setSaving] = useState(false);
-  const [pageCount, setPageCount] = useState(1);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [, force] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [autosave, setAutosave] = useState(readAutosavePref);
+  const [fmt, setFmt] = useState(DEFAULT_FMT);
+  const fmtTouchedRef = useRef(false);
+  const fmtTimerRef = useRef(null);
+
+  const autosaveRef = useRef(autosave);
+  autosaveRef.current = autosave;
+  const contentRef = useRef(file.content || '');
+  const composingRef = useRef(false);
+  const savingRef = useRef(false);
+  const touchedRef = useRef(false);
 
   const rulerHRef = useRef(null);
   const rulerVRef = useRef(null);
+  const rulerHInnerRef = useRef(null);
+  const rulerVInnerRef = useRef(null);
   const pageRef = useRef(null);
   const scrollRef = useRef(null);
   const editableRef = useRef(null);
-
-  const [geom, setGeom] = useState({ pageLeft: 0, pageTop: 0, scrollTop: 0 });
-
-  function measurePages() {
-    if (!editableRef.current) return;
-    const el = editableRef.current;
-    const prev = el.style.height;
-    el.style.height = 'auto';
-    const h = el.scrollHeight;
-    el.style.height = prev;
-    const n = Math.max(1, Math.ceil(h / PAGE_H_PX));
-    setPageCount(n);
-  }
+  const rafIdRef = useRef(null);
+  const saveTimer = useRef(null);
 
   const recompute = useCallback(() => {
     if (!pageRef.current || !rulerHRef.current || !rulerVRef.current) return;
+    if (!rulerHInnerRef.current || !rulerVInnerRef.current) return;
     const pageR = pageRef.current.getBoundingClientRect();
     const hR = rulerHRef.current.getBoundingClientRect();
     const vR = rulerVRef.current.getBoundingClientRect();
     const scrollTop = scrollRef.current ? scrollRef.current.scrollTop : 0;
-    setGeom({
-      pageLeft: pageR.left - hR.left,
-      pageTop: pageR.top - vR.top,
-      scrollTop,
+    const pageLeft = pageR.left - hR.left;
+    const pageTop = pageR.top - vR.top;
+    rulerHInnerRef.current.style.transform = `translateX(${pageLeft}px)`;
+    rulerVInnerRef.current.style.transform = `translateY(${pageTop - scrollTop}px)`;
+  }, []);
+
+  const scheduleRecompute = useCallback(() => {
+    if (rafIdRef.current != null) return;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      recompute();
     });
-    if (pageRef.current && scrollRef.current) {
-      const stackTop = pageRef.current.offsetTop;
-      const focus = scrollTop + scrollRef.current.clientHeight / 3;
-      const offset = focus - stackTop;
-      const stride = PAGE_H_PX + PAGE_GAP;
-      const idx = Math.max(1, Math.min(pageCount, Math.floor(offset / stride) + 1));
-      setCurrentPage(idx);
-    }
-  }, [pageCount]);
+  }, [recompute]);
 
   useLayoutEffect(() => { recompute(); }, [recompute]);
   useEffect(() => {
-    const ro = new ResizeObserver(recompute);
+    const ro = new ResizeObserver(scheduleRecompute);
     if (scrollRef.current) ro.observe(scrollRef.current);
     if (pageRef.current) ro.observe(pageRef.current);
-    window.addEventListener('resize', recompute);
-    return () => { ro.disconnect(); window.removeEventListener('resize', recompute); };
-  }, [recompute]);
+    window.addEventListener('resize', scheduleRecompute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', scheduleRecompute);
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    };
+  }, [scheduleRecompute]);
 
-  const saveTimer = useRef(null);
-  useEffect(() => {
+  function scheduleAutosave() {
+    if (!autosaveRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaving(true);
+    if (!savingRef.current) {
+      savingRef.current = true;
+      setSaving(true);
+    }
     saveTimer.current = setTimeout(() => {
-      onChange({ name: title, content, margins });
+      saveTimer.current = null;
+      const latest = editableRef.current ? editableRef.current.innerText : contentRef.current;
+      contentRef.current = latest;
+      onChange({ name: title, content: latest, margins });
       setSavedAt(Date.now());
+      savingRef.current = false;
       setSaving(false);
+      setDirty(false);
     }, 600);
-    return () => clearTimeout(saveTimer.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, content, margins]);
-
-  useEffect(() => {
-    const t = setInterval(() => force(n => n + 1), 30000);
-    return () => clearInterval(t);
-  }, []);
-
-  function applyContentFromDOM() {
-    if (!editableRef.current) return;
-    setContent(editableRef.current.innerText);
-    requestAnimationFrame(measurePages);
   }
 
   useEffect(() => {
-    if (editableRef.current && editableRef.current.innerText !== content) {
-      editableRef.current.innerText = content;
+    if (!touchedRef.current) {
+      touchedRef.current = true;
+      return;
     }
-    requestAnimationFrame(measurePages);
+    if (!autosave) return;
+    scheduleAutosave();
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, margins, autosave]);
+
+  function markDirtyIfOff() {
+    if (!autosaveRef.current) setDirty(true);
+  }
+
+  function applyContentFromDOM() {
+    if (composingRef.current) return;
+    if (!editableRef.current) return;
+    contentRef.current = editableRef.current.innerText;
+    if (autosaveRef.current) {
+      scheduleAutosave();
+    } else {
+      setDirty(true);
+    }
+  }
+
+  function handleCompositionStart() {
+    composingRef.current = true;
+  }
+  function handleCompositionEnd() {
+    composingRef.current = false;
+    applyContentFromDOM();
+  }
+
+  useEffect(() => {
+    if (editableRef.current) {
+      editableRef.current.innerText = contentRef.current;
+    }
+    setDirty(false);
+    touchedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file.id]);
 
   useEffect(() => {
-    requestAnimationFrame(measurePages);
-  }, [margins]);
+    fmtTouchedRef.current = false;
+    if (fmtTimerRef.current) { clearTimeout(fmtTimerRef.current); fmtTimerRef.current = null; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await invoke('get_format', { relPath: file.id });
+        if (cancelled) return;
+        fmtTouchedRef.current = false;
+        setFmt({ ...DEFAULT_FMT, ...loaded });
+      } catch {
+        if (!cancelled) {
+          fmtTouchedRef.current = false;
+          setFmt(DEFAULT_FMT);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [file.id]);
 
-  let statusText = '';
-  let statusClass = '';
-  if (saving) { statusText = '저장 중…'; statusClass = 'saving'; }
-  else if (savedAt) { statusText = `${timeAgo(savedAt)} 저장됨`; statusClass = 'saved'; }
-  else { statusText = '저장되지 않음'; }
-
-  const hTicks = [];
-  for (let cm = 0; cm <= PAGE_W_CM; cm++) {
-    const x = geom.pageLeft + cm * PX_PER_CM;
-    hTicks.push(<div key={'M'+cm} className="tick major" style={{ left: x }}></div>);
-    if (cm > 0) {
-      hTicks.push(<div key={'L'+cm} className="ruler-label" style={{ left: x }}>{cm}</div>);
+  useEffect(() => {
+    if (!fmtTouchedRef.current) {
+      fmtTouchedRef.current = true;
+      return;
     }
-    if (cm < PAGE_W_CM) {
-      for (let mm = 2; mm < 10; mm += 2) {
-        const xm = geom.pageLeft + (cm + mm/10) * PX_PER_CM;
-        hTicks.push(<div key={'m'+cm+'-'+mm} className="tick minor" style={{ left: xm }}></div>);
+    if (fmtTimerRef.current) clearTimeout(fmtTimerRef.current);
+    const snapshot = fmt;
+    fmtTimerRef.current = setTimeout(() => {
+      fmtTimerRef.current = null;
+      invoke('set_format', { args: { relPath: file.id, meta: snapshot } }).catch(() => {});
+    }, 400);
+    return () => { if (fmtTimerRef.current) { clearTimeout(fmtTimerRef.current); fmtTimerRef.current = null; } };
+  }, [fmt, file.id]);
+
+  const editorVars = useMemo(() => ({
+    '--editor-font-family': fontStackFor(fmt.fontFamily),
+    '--editor-font-size': `${fmt.fontSize}px`,
+    '--editor-letter-spacing': `${fmt.letterSpacing}px`,
+    '--editor-line-height': String(fmt.lineHeight),
+  }), [fmt]);
+
+  function manualSave() {
+    const latest = editableRef.current ? editableRef.current.innerText : contentRef.current;
+    contentRef.current = latest;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    onSaveNow({ name: title, content: latest, margins });
+    setSavedAt(Date.now());
+    savingRef.current = false;
+    setSaving(false);
+    setDirty(false);
+  }
+
+  function toggleAutosave() {
+    const next = !autosave;
+    if (next && editableRef.current) {
+      contentRef.current = editableRef.current.innerText;
+    }
+    if (!next && saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      savingRef.current = false;
+      setSaving(false);
+    }
+    setAutosave(next);
+    writeAutosavePref(next);
+    setDirty(false);
+  }
+
+  const hTicks = useMemo(() => {
+    const out = [];
+    for (let cm = 0; cm <= PAGE_W_CM; cm++) {
+      const x = cm * PX_PER_CM;
+      out.push(<div key={'M'+cm} className="tick major" style={{ left: x }} />);
+      if (cm > 0) {
+        out.push(<div key={'L'+cm} className="ruler-label" style={{ left: x }}>{cm}</div>);
+      }
+      if (cm < PAGE_W_CM) {
+        for (let mm = 2; mm < 10; mm += 2) {
+          const xm = (cm + mm / 10) * PX_PER_CM;
+          out.push(<div key={'m'+cm+'-'+mm} className="tick minor" style={{ left: xm }} />);
+        }
       }
     }
-  }
-  const vTicks = [];
-  for (let cm = 0; cm <= PAGE_H_CM; cm++) {
-    const y = geom.pageTop - geom.scrollTop + cm * PX_PER_CM;
-    vTicks.push(<div key={'M'+cm} className="tick major" style={{ top: y }}></div>);
-    if (cm > 0) {
-      vTicks.push(<div key={'L'+cm} className="ruler-label" style={{ top: y }}>{cm}</div>);
-    }
-    if (cm < PAGE_H_CM) {
-      for (let mm = 2; mm < 10; mm += 2) {
-        const ym = geom.pageTop - geom.scrollTop + (cm + mm/10) * PX_PER_CM;
-        vTicks.push(<div key={'m'+cm+'-'+mm} className="tick minor" style={{ top: ym }}></div>);
+    return out;
+  }, []);
+
+  const vTicks = useMemo(() => {
+    const out = [];
+    for (let cm = 0; cm <= PAGE_H_CM; cm++) {
+      const y = cm * PX_PER_CM;
+      out.push(<div key={'M'+cm} className="tick major" style={{ top: y }} />);
+      if (cm > 0) {
+        out.push(<div key={'L'+cm} className="ruler-label" style={{ top: y }}>{cm}</div>);
+      }
+      if (cm < PAGE_H_CM) {
+        for (let mm = 2; mm < 10; mm += 2) {
+          const ym = (cm + mm / 10) * PX_PER_CM;
+          out.push(<div key={'m'+cm+'-'+mm} className="tick minor" style={{ top: ym }} />);
+        }
       }
     }
-  }
+    return out;
+  }, []);
 
   function startDrag(axis, side) {
     return (downEvent) => {
@@ -165,6 +301,7 @@ export default function Editor({
                        : side === 'top' ? margins.bottom : margins.top;
         next = Math.max(0.5, Math.min(maxAxis - opposite - 2, next));
         setMargins(m => ({ ...m, [side]: Math.round(next * 10) / 10 }));
+        markDirtyIfOff();
       }
       function onUp() {
         window.removeEventListener('mousemove', onMove);
@@ -175,10 +312,12 @@ export default function Editor({
     };
   }
 
-  const hLeftX  = geom.pageLeft + margins.left * PX_PER_CM;
-  const hRightX = geom.pageLeft + (PAGE_W_CM - margins.right) * PX_PER_CM;
-  const vTopY   = geom.pageTop - geom.scrollTop + margins.top * PX_PER_CM;
-  const vBotY   = geom.pageTop - geom.scrollTop + (PAGE_H_CM - margins.bottom) * PX_PER_CM;
+  const hLeftX  = margins.left * PX_PER_CM;
+  const hRightX = (PAGE_W_CM - margins.right) * PX_PER_CM;
+  const vTopY   = margins.top * PX_PER_CM;
+  const vBotY   = (PAGE_H_CM - margins.bottom) * PX_PER_CM;
+
+  const showUnsaved = !autosave && dirty;
 
   return (
     <main className="main">
@@ -202,21 +341,24 @@ export default function Editor({
           className="topbar-title"
           value={title}
           placeholder="제목 없음"
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => { setTitle(e.target.value); markDirtyIfOff(); }}
         />
+
+        <FormatControls fmt={fmt} onChange={setFmt} />
 
         <div className="topbar-spacer"></div>
 
-        <div className="page-counter" title="현재 페이지 / 전체 페이지">
-          <span className="page-counter-cur">{currentPage}</span>
-          <span className="page-counter-sep">/</span>
-          <span className="page-counter-total">{pageCount}</span>
-        </div>
+        <button
+          type="button"
+          className={`autosave-toggle ${autosave ? 'on' : 'off'}`}
+          onClick={toggleAutosave}
+          title={autosave ? '자동저장 켜짐 — 변경 시 자동으로 저장됩니다' : '자동저장 꺼짐 — 저장 버튼으로만 저장됩니다'}
+        >
+          <span className="autosave-dot"></span>
+          자동저장 {autosave ? 'ON' : 'OFF'}
+        </button>
 
-        <div className={`save-status ${statusClass}`}>
-          <span className="pulse"></span>
-          {statusText}
-        </div>
+        <SaveStatus saving={saving} dirty={showUnsaved} savedAt={savedAt} />
 
         <SplitButton
           items={items}
@@ -227,7 +369,7 @@ export default function Editor({
           onCloseSplit={onCloseSplit}
         />
 
-        <button className="btn primary" onClick={() => { onSaveNow({ name: title, content, margins }); setSavedAt(Date.now()); }}>
+        <button className={`btn primary ${showUnsaved ? 'urgent' : ''}`} onClick={manualSave}>
           <Icon name="save" size={14}/>저장
         </button>
       </div>
@@ -236,29 +378,35 @@ export default function Editor({
         <div className="ruler-corner">cm</div>
 
         <div className="ruler-h" ref={rulerHRef}>
-          <div className="margin-zone" style={{ left: geom.pageLeft, width: margins.left * PX_PER_CM }}></div>
-          <div className="margin-zone" style={{ left: hRightX, width: margins.right * PX_PER_CM }}></div>
-          {hTicks}
-          <div className="margin-handle" style={{ left: hLeftX }} onMouseDown={startDrag('h', 'left')} title={`왼쪽 여백 ${margins.left}cm`}></div>
-          <div className="margin-handle" style={{ left: hRightX }} onMouseDown={startDrag('h', 'right')} title={`오른쪽 여백 ${margins.right}cm`}></div>
+          <div className="ruler-inner" ref={rulerHInnerRef}>
+            <div className="margin-zone" style={{ left: 0, width: margins.left * PX_PER_CM }}></div>
+            <div className="margin-zone" style={{ left: hRightX, width: margins.right * PX_PER_CM }}></div>
+            {hTicks}
+            <div className="margin-handle" style={{ left: hLeftX }} onMouseDown={startDrag('h', 'left')} title={`왼쪽 여백 ${margins.left}cm`}></div>
+            <div className="margin-handle" style={{ left: hRightX }} onMouseDown={startDrag('h', 'right')} title={`오른쪽 여백 ${margins.right}cm`}></div>
+          </div>
         </div>
 
         <div className="ruler-v" ref={rulerVRef}>
-          <div className="margin-zone" style={{ top: geom.pageTop - geom.scrollTop, height: margins.top * PX_PER_CM }}></div>
-          <div className="margin-zone" style={{ top: vBotY, height: margins.bottom * PX_PER_CM }}></div>
-          {vTicks}
-          <div className="margin-handle" style={{ top: vTopY }} onMouseDown={startDrag('v', 'top')} title={`위 여백 ${margins.top}cm`}></div>
-          <div className="margin-handle" style={{ top: vBotY }} onMouseDown={startDrag('v', 'bottom')} title={`아래 여백 ${margins.bottom}cm`}></div>
+          <div className="ruler-inner" ref={rulerVInnerRef}>
+            <div className="margin-zone" style={{ top: 0, height: margins.top * PX_PER_CM }}></div>
+            <div className="margin-zone" style={{ top: vBotY, height: margins.bottom * PX_PER_CM }}></div>
+            {vTicks}
+            <div className="margin-handle" style={{ top: vTopY }} onMouseDown={startDrag('v', 'top')} title={`위 여백 ${margins.top}cm`}></div>
+            <div className="margin-handle" style={{ top: vBotY }} onMouseDown={startDrag('v', 'bottom')} title={`아래 여백 ${margins.bottom}cm`}></div>
+          </div>
         </div>
 
-        <div className="editor-scroll" ref={scrollRef} onScroll={recompute}>
+        <div className="editor-scroll" ref={scrollRef} onScroll={scheduleRecompute}>
           <div className="page-wrap">
             <PageStack
-              pageCount={pageCount}
               margins={margins}
               editableRef={editableRef}
               pageRef={pageRef}
               onInput={applyContentFromDOM}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              editorVars={editorVars}
             />
           </div>
         </div>
@@ -267,37 +415,32 @@ export default function Editor({
   );
 }
 
-function PageStack({ pageCount, margins, editableRef, pageRef, onInput }) {
-  const stride = PAGE_H_PX + PAGE_GAP;
-  const stackHeight = pageCount * PAGE_H_PX + Math.max(0, pageCount - 1) * PAGE_GAP;
-
-  let maskImage = 'none';
-  if (pageCount > 1) {
-    const stops = ['black 0'];
-    for (let i = 1; i < pageCount; i++) {
-      const y = i * PAGE_H_PX + (i - 1) * PAGE_GAP;
-      stops.push(`black ${y}px`);
-      stops.push(`transparent ${y}px`);
-      stops.push(`transparent ${y + PAGE_GAP}px`);
-      stops.push(`black ${y + PAGE_GAP}px`);
-    }
-    stops.push(`black ${stackHeight}px`);
-    maskImage = `linear-gradient(to bottom, ${stops.join(', ')})`;
-  }
-
+function SaveStatus({ saving, dirty, savedAt }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => force(n => n + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  let text = '';
+  let cls = '';
+  if (saving) { text = '저장 중…'; cls = 'saving'; }
+  else if (dirty) { text = '미저장 변경 있음'; cls = 'dirty'; }
+  else if (savedAt) { text = `${timeAgo(savedAt)} 저장됨`; cls = 'saved'; }
+  else { text = '저장되지 않음'; }
   return (
-    <div className="page-stack" ref={pageRef} style={{ height: stackHeight }}>
-      {Array.from({ length: pageCount }).map((_, i) => (
-        <div
-          key={i}
-          className="page-sheet"
-          style={{ top: i * stride, height: PAGE_H_PX }}
-        >
-          <CornerCrops margins={margins} />
-          <div className="page-sheet-number">— {i + 1} —</div>
-        </div>
-      ))}
+    <div className={`save-status ${cls}`}>
+      <span className="pulse"></span>
+      {text}
+    </div>
+  );
+}
 
+function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionEnd, editorVars }) {
+  return (
+    <div className="page-stack" ref={pageRef}>
+      <div className="page-sheet">
+        <CornerCrops margins={margins} />
+      </div>
       <div
         ref={editableRef}
         className="page-content"
@@ -307,12 +450,57 @@ function PageStack({ pageCount, margins, editableRef, pageRef, onInput }) {
         data-placeholder="여기에 글을 시작하세요."
         style={{
           padding: `${margins.top * PX_PER_CM}px ${margins.right * PX_PER_CM}px ${margins.bottom * PX_PER_CM}px ${margins.left * PX_PER_CM}px`,
-          height: stackHeight,
-          WebkitMaskImage: maskImage,
-          maskImage: maskImage,
+          ...editorVars,
         }}
         onInput={onInput}
+        onCompositionStart={onCompositionStart}
+        onCompositionEnd={onCompositionEnd}
       />
+    </div>
+  );
+}
+
+function FormatControls({ fmt, onChange }) {
+  function patch(p) { onChange(prev => ({ ...prev, ...p })); }
+  return (
+    <div className="format-controls" title="문서 서식">
+      <select
+        className="fmt-select"
+        value={fmt.fontFamily}
+        onChange={(e) => patch({ fontFamily: e.target.value })}
+        title="글꼴"
+      >
+        {FONT_OPTIONS.map(o => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      <div className="fmt-stepper" title="글자 크기 (px)">
+        <span className="fmt-icon" aria-hidden>가</span>
+        <input
+          type="number"
+          min={8} max={48} step={0.5}
+          value={fmt.fontSize}
+          onChange={(e) => patch({ fontSize: clamp(parseFloat(e.target.value), 8, 48) })}
+        />
+      </div>
+      <div className="fmt-stepper" title="자간 (px)">
+        <span className="fmt-icon" aria-hidden>↔</span>
+        <input
+          type="number"
+          min={-2} max={5} step={0.1}
+          value={fmt.letterSpacing}
+          onChange={(e) => patch({ letterSpacing: clamp(parseFloat(e.target.value), -2, 5) })}
+        />
+      </div>
+      <div className="fmt-stepper" title="행간 (배수)">
+        <span className="fmt-icon" aria-hidden>↕</span>
+        <input
+          type="number"
+          min={1.0} max={3.0} step={0.05}
+          value={fmt.lineHeight}
+          onChange={(e) => patch({ lineHeight: clamp(parseFloat(e.target.value), 1.0, 3.0) })}
+        />
+      </div>
     </div>
   );
 }
@@ -352,20 +540,23 @@ function SplitButton({ items, workspaceId, currentFileId, splitFileId, onOpenSpl
     return () => document.removeEventListener('mousedown', handle);
   }, [open]);
 
-  function descendant(id) {
-    if (!workspaceId) return true;
-    let cur = id;
-    while (cur) {
-      if (cur === workspaceId) return true;
-      const f = items.find(x => x.id === cur);
-      if (!f) return false;
-      cur = f.parent;
+  const others = useMemo(() => {
+    const byId = new Map(items.map(it => [it.id, it]));
+    function descendant(id) {
+      if (!workspaceId) return true;
+      let cur = id;
+      while (cur) {
+        if (cur === workspaceId) return true;
+        const f = byId.get(cur);
+        if (!f) return false;
+        cur = f.parent;
+      }
+      return false;
     }
-    return false;
-  }
-  const others = items
-    .filter(it => it.type === 'file' && it.id !== currentFileId && descendant(it.parent))
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return items
+      .filter(it => it.type === 'file' && it.id !== currentFileId && descendant(it.parent))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }, [items, currentFileId, workspaceId]);
 
   if (splitFileId) {
     return (

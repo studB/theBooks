@@ -30,12 +30,25 @@ impl From<reqwest::Error> for ChatError {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct S3WorkspaceConfig {
+    pub bucket: String,
+    #[serde(default)]
+    pub prefix: String,
+    pub region: String,
+    pub access_key: String,
+    pub secret_key: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub anthropic_api_key: Option<String>,
     #[serde(default)]
     pub workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub s3_workspace: Option<S3WorkspaceConfig>,
     #[serde(default)]
     pub migrated_v4_local: bool,
 }

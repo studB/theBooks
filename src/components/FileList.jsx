@@ -57,10 +57,11 @@ function EmptyWorkspace({ onPickClick }) {
 }
 
 export default function FileList({
-  items, workspaceId, workspaceName, workspacePath, currentFolderId, breadcrumb,
+  items, workspaceId, workspaceName, workspacePath, workspaceKind, currentFolderId, breadcrumb,
   onEnter, onOpenFile, onUp, onJumpToWorkspace, onJumpTo,
   onOpenWorkspaceDialog,
   onNewFile, onNewFolder, onDelete, onRename,
+  syncing, syncMessage, onSync,
 }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('updated');
@@ -135,6 +136,23 @@ export default function FileList({
         )}
 
         <div className="topbar-spacer"></div>
+        {workspaceKind === 's3' && (
+          <>
+            {syncMessage && (
+              <span className="caption" style={{ marginRight: 6, color: 'var(--gray-600)' }}>
+                {syncMessage}
+              </span>
+            )}
+            <button
+              className="btn ghost"
+              onClick={onSync}
+              disabled={syncing}
+              title="S3와 동기화"
+            >
+              <Icon name="save" size={14}/>{syncing ? '동기화 중…' : '동기화'}
+            </button>
+          </>
+        )}
         {!noWorkspace && (
           <>
             <button className="btn ghost" onClick={onNewFolder}>

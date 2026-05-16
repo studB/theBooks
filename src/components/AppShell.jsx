@@ -5,6 +5,7 @@ import FileList from './FileList.jsx';
 import Editor from './Editor.jsx';
 import Chat from './Chat.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
+import WorkspacePickerModal from './WorkspacePickerModal.jsx';
 
 const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
 const LEGACY_WORKSPACE_KEY = 'thebooks.v4.workspace';
@@ -52,9 +53,24 @@ export default function AppShell() {
   const [splitFileId, setSplitFileId] = useState(null);
   const [splitWidth, setSplitWidth] = useState(420);
   const [loadError, setLoadError] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState(null);
+  const autoSyncedRef = useRef(false);
   const saveQueue = useRef(new Map());
 
-  const workspaceName = useMemo(() => basename(workspacePath), [workspacePath]);
+  const workspaceKind = workspacePath
+    ? (workspacePath.startsWith('s3://') ? 's3' : 'local')
+    : null;
+  const workspaceName = useMemo(() => {
+    if (!workspacePath) return '';
+    if (workspaceKind === 's3') {
+      const rest = workspacePath.slice('s3://'.length);
+      return basename(rest) || rest;
+    }
+    return basename(workspacePath);
+  }, [workspacePath, workspaceKind]);
   const workspaceId = workspacePath ? ROOT_ID : null;
 
   const refresh = useCallback(async (path) => {
@@ -106,6 +122,13 @@ export default function AppShell() {
     if (workspacePath) refresh(workspacePath);
   }, [workspacePath, refresh]);
 
+  useEffect(() => {
+    if (workspaceKind === 's3' && !autoSyncedRef.current) {
+      autoSyncedRef.current = true;
+      runSync({ silent: false });
+    }
+  }, [workspaceKind]);
+
   async function maybeMigrate() {
     let migrated;
     try {
@@ -133,19 +156,73 @@ export default function AppShell() {
     }
   }
 
-  async function pickWorkspace() {
+  function pickWorkspace() {
+    setPickerOpen(true);
+  }
+
+  async function pickLocalFromModal() {
+    setPickerBusy(true);
     try {
       const selected = await openDialog({ directory: true, multiple: false });
       if (!selected || typeof selected !== 'string') return;
       await invoke('set_workspace', { path: selected });
+      autoSyncedRef.current = false;
       setWorkspacePath(selected);
       setCurrentFolderId(ROOT_ID);
       setOpenFileId(null);
       setSplitFileId(null);
       await maybeMigrate();
       await refresh(selected);
+      setPickerOpen(false);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function pickS3FromModal({ bucket, prefix, region, accessKey, secretKey }) {
+    setPickerBusy(true);
+    try {
+      await invoke('set_s3_workspace', {
+        args: { bucket, prefix, region, accessKey, secretKey },
+      });
+      const newWsPath = `s3://${bucket}/${prefix || ''}`;
+      autoSyncedRef.current = true;
+      setWorkspacePath(newWsPath);
+      setCurrentFolderId(ROOT_ID);
+      setOpenFileId(null);
+      setSplitFileId(null);
+      setPickerOpen(false);
+      await runSync({ silent: false });
+      await refresh(newWsPath);
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function runSync({ silent } = { silent: false }) {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMessage(silent ? null : '동기화 중…');
+    try {
+      const res = await invoke('sync_workspace');
+      const parts = [];
+      if (res.pulled) parts.push(`내려받음 ${res.pulled}`);
+      if (res.pushed) parts.push(`올림 ${res.pushed}`);
+      if (res.skipped) parts.push(`그대로 ${res.skipped}`);
+      if (res.failed) parts.push(`실패 ${res.failed}`);
+      const summary = parts.length ? parts.join(', ') : '변경 없음';
+      setSyncMessage(`동기화 완료: ${summary}`);
+      if (res.failed && res.errors?.length) {
+        setLoadError('일부 파일 동기화 실패: ' + res.errors.slice(0, 3).join(' / '));
+      }
+      await refresh();
+      setTimeout(() => setSyncMessage(null), 4000);
     } catch (e) {
-      setLoadError(e?.message || String(e));
+      const msg = e?.message || (typeof e === 'string' ? e : JSON.stringify(e));
+      setSyncMessage(null);
+      setLoadError('동기화 실패: ' + msg);
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -181,23 +258,34 @@ export default function AppShell() {
     const it = items.find(x => x.id === id);
     if (!it || it.type !== 'file') return;
     if (typeof it.content === 'string') return;
-    try {
-      const data = await invoke('read_file', { relPath: id });
-      setItems(arr => arr.map(x => x.id === id
-        ? { ...x, content: data.content, margins: data.margins, updatedAt: data.updatedAt }
-        : x));
-    } catch (e) {
-      setLoadError(e?.message || String(e));
+    const data = await invoke('read_file', { relPath: id });
+    setItems(arr => arr.map(x => x.id === id
+      ? { ...x, content: data.content, margins: data.margins, updatedAt: data.updatedAt }
+      : x));
+  }
+
+  function describeOpenError(e) {
+    if (e && typeof e === 'object' && e.kind === 'Binary') {
+      return e.message || '이 파일은 앱에서 열 수 없습니다.';
     }
+    return e?.message || (typeof e === 'string' ? e : JSON.stringify(e));
   }
 
   async function openFileById(id) {
-    setOpenFileId(id);
-    await ensureContent(id);
+    try {
+      await ensureContent(id);
+      setOpenFileId(id);
+    } catch (e) {
+      setLoadError(describeOpenError(e));
+    }
   }
   async function openSplitById(id) {
-    setSplitFileId(id);
-    await ensureContent(id);
+    try {
+      await ensureContent(id);
+      setSplitFileId(id);
+    } catch (e) {
+      setLoadError(describeOpenError(e));
+    }
   }
 
   function scheduleWrite(id, patch) {
@@ -326,6 +414,7 @@ export default function AppShell() {
           workspaceId={workspaceId}
           workspaceName={workspaceName}
           workspacePath={workspacePath}
+          workspaceKind={workspaceKind}
           currentFolderId={currentFolderId}
           breadcrumb={breadcrumbForList}
           onOpenWorkspaceDialog={pickWorkspace}
@@ -341,8 +430,19 @@ export default function AppShell() {
           onNewFolder={handleNewFolder}
           onDelete={deleteItem}
           onRename={rename}
+          syncing={syncing}
+          syncMessage={syncMessage}
+          onSync={() => runSync({ silent: false })}
         />
       )}
+
+      <WorkspacePickerModal
+        open={pickerOpen}
+        busy={pickerBusy}
+        onClose={() => setPickerOpen(false)}
+        onPickLocal={pickLocalFromModal}
+        onPickS3={pickS3FromModal}
+      />
 
       {loadError && (
         <div style={{

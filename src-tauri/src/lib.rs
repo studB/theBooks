@@ -1,5 +1,6 @@
 mod chat;
 mod fs;
+mod s3;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -28,6 +29,9 @@ pub fn run() {
             fs::set_workspace,
             fs::migrate_from_local,
             fs::is_migrated_v4_local,
+            s3::sync_workspace,
+            s3::set_s3_workspace,
+            s3::get_s3_workspace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

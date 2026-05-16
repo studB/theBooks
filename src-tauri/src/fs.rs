@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
-use crate::chat::{load_config, save_config};
+use crate::chat::{load_config, save_config, S3WorkspaceConfig};
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", content = "message")]
@@ -14,6 +14,7 @@ pub enum FsError {
     Parse(String),
     Trash(String),
     Conflict(String),
+    Binary(String),
 }
 
 impl From<std::io::Error> for FsError {
@@ -75,8 +76,26 @@ pub enum Item {
     },
 }
 
+pub(crate) fn s3_cache_root(app: &AppHandle, s3: &S3WorkspaceConfig) -> Result<PathBuf, FsError> {
+    let url = format!("s3://{}/{}", s3.bucket, s3.prefix);
+    let hash = blake3::hash(url.as_bytes()).to_hex();
+    let key: String = hash.as_str().chars().take(16).collect();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| FsError::Io(format!("app_data_dir: {e}")))?;
+    let cache = data_dir.join("s3-cache").join(key);
+    if !cache.exists() {
+        fs::create_dir_all(&cache)?;
+    }
+    Ok(cache)
+}
+
 fn workspace_root(app: &AppHandle) -> Result<PathBuf, FsError> {
     let cfg = load_config(app).map_err(|e| FsError::Io(format!("config: {:?}", e)))?;
+    if let Some(s3) = cfg.s3_workspace.as_ref() {
+        return s3_cache_root(app, s3);
+    }
     cfg.workspace.ok_or(FsError::NoWorkspace)
 }
 
@@ -127,6 +146,11 @@ fn parent_id(rel_id: &str) -> Option<String> {
     } else {
         Some(parts[..parts.len() - 1].join("/"))
     }
+}
+
+fn is_md(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
 }
 
 fn sanitize_name(name: &str) -> String {
@@ -242,19 +266,25 @@ fn collect_items(root: &Path, dir: &Path, out: &mut Vec<Item>) -> Result<(), FsE
             });
             collect_items(root, &path, out)?;
         } else if ft.is_file() {
-            if !raw_name.to_lowercase().ends_with(".md") {
-                continue;
-            }
             let id = match to_rel_id(root, &path) {
                 Some(s) => s,
                 None => continue,
             };
-            let raw = fs::read_to_string(&path).unwrap_or_default();
-            let (fm, _) = parse_frontmatter(&raw);
-            let stem = raw_name.trim_end_matches(".md").trim_end_matches(".MD");
-            let title = fm.title.unwrap_or_else(|| stem.to_string());
-            let margins = fm.margins.unwrap_or_default();
-            let created_at = fm.created_at.unwrap_or_else(|| ctime_ms(&path));
+            let (title, margins, created_at) = if is_md(&raw_name) {
+                let raw = fs::read_to_string(&path).unwrap_or_default();
+                let (fm, _) = parse_frontmatter(&raw);
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let title = fm.title.unwrap_or(stem);
+                let margins = fm.margins.unwrap_or_default();
+                let created_at = fm.created_at.unwrap_or_else(|| ctime_ms(&path));
+                (title, margins, created_at)
+            } else {
+                (raw_name.clone(), Margins::default(), ctime_ms(&path))
+            };
             let parent = parent_id(&id);
             out.push(Item::File {
                 id,
@@ -294,20 +324,38 @@ pub struct FileContent {
 pub fn read_file(app: AppHandle, rel_path: String) -> Result<FileContent, FsError> {
     let root = workspace_root(&app)?;
     let full = resolve(&root, &rel_path)?;
-    let raw = fs::read_to_string(&full)?;
-    let (fm, body) = parse_frontmatter(&raw);
+    let file_name = full
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    let bytes = fs::read(&full)?;
+    let raw = String::from_utf8(bytes).map_err(|_| {
+        FsError::Binary(format!("이 파일은 텍스트로 열 수 없습니다: {file_name}"))
+    })?;
     let stem = full
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_string();
-    Ok(FileContent {
-        content: body,
-        margins: fm.margins.unwrap_or_default(),
-        title: fm.title.unwrap_or(stem),
-        created_at: fm.created_at.unwrap_or_else(|| ctime_ms(&full)),
-        updated_at: mtime_ms(&full),
-    })
+    if is_md(&file_name) {
+        let (fm, body) = parse_frontmatter(&raw);
+        Ok(FileContent {
+            content: body,
+            margins: fm.margins.unwrap_or_default(),
+            title: fm.title.unwrap_or(stem),
+            created_at: fm.created_at.unwrap_or_else(|| ctime_ms(&full)),
+            updated_at: mtime_ms(&full),
+        })
+    } else {
+        Ok(FileContent {
+            content: raw,
+            margins: Margins::default(),
+            title: if file_name.is_empty() { stem } else { file_name },
+            created_at: ctime_ms(&full),
+            updated_at: mtime_ms(&full),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -325,8 +373,20 @@ pub struct WriteFileArgs {
 pub fn write_file(app: AppHandle, args: WriteFileArgs) -> Result<i64, FsError> {
     let root = workspace_root(&app)?;
     let full = resolve(&root, &args.rel_path)?;
-    let created_at = args.created_at.unwrap_or_else(now_ms);
-    write_md(&full, &args.title, &args.margins, created_at, &args.content)?;
+    let file_name = full
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    if is_md(&file_name) {
+        let created_at = args.created_at.unwrap_or_else(now_ms);
+        write_md(&full, &args.title, &args.margins, created_at, &args.content)?;
+    } else {
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&full, &args.content)?;
+    }
     Ok(mtime_ms(&full))
 }
 
@@ -448,24 +508,46 @@ pub fn rename_item(app: AppHandle, args: RenameArgs) -> Result<RenamedItem, FsEr
     if new_name.is_empty() {
         return Err(FsError::InvalidPath("empty name".into()));
     }
-    let stem = sanitize_name(new_name);
-    let (ext, file_title) = if is_dir {
-        ("", String::new())
+    let original_ext = if is_dir {
+        String::new()
     } else {
-        ("md", new_name.to_string())
+        full.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string()
     };
-    let (_final_stem, new_full) = pick_available_name(&parent_dir, &stem, ext, is_dir)?;
+    let new_name_stem: &str = if !original_ext.is_empty() {
+        let ext_suffix = format!(".{}", original_ext);
+        let ext_suffix_lower = ext_suffix.to_lowercase();
+        if new_name.to_lowercase().ends_with(&ext_suffix_lower) {
+            &new_name[..new_name.len() - ext_suffix.len()]
+        } else {
+            new_name
+        }
+    } else {
+        new_name
+    };
+    let stem = sanitize_name(new_name_stem);
+    let (_final_stem, new_full) =
+        pick_available_name(&parent_dir, &stem, &original_ext, is_dir)?;
     if new_full == full {
         let id = to_rel_id(&root, &full).ok_or_else(|| FsError::Io("id".into()))?;
         return Ok(RenamedItem { id });
     }
     fs::rename(&full, &new_full)?;
     if !is_dir {
-        let raw = fs::read_to_string(&new_full).unwrap_or_default();
-        let (fm, body) = parse_frontmatter(&raw);
-        let margins = fm.margins.unwrap_or_default();
-        let created_at = fm.created_at.unwrap_or_else(|| ctime_ms(&new_full));
-        write_md(&new_full, &file_title, &margins, created_at, &body)?;
+        let new_file_name = new_full
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        if is_md(&new_file_name) {
+            let raw = fs::read_to_string(&new_full).unwrap_or_default();
+            let (fm, body) = parse_frontmatter(&raw);
+            let margins = fm.margins.unwrap_or_default();
+            let created_at = fm.created_at.unwrap_or_else(|| ctime_ms(&new_full));
+            write_md(&new_full, new_name_stem, &margins, created_at, &body)?;
+        }
     }
     let id = to_rel_id(&root, &new_full).ok_or_else(|| FsError::Io("id".into()))?;
     Ok(RenamedItem { id })
@@ -485,6 +567,9 @@ pub fn delete_item(app: AppHandle, rel_path: String) -> Result<(), FsError> {
 #[tauri::command]
 pub fn get_workspace(app: AppHandle) -> Result<Option<String>, FsError> {
     let cfg = load_config(&app).map_err(|e| FsError::Io(format!("config: {:?}", e)))?;
+    if let Some(s3) = cfg.s3_workspace.as_ref() {
+        return Ok(Some(format!("s3://{}/{}", s3.bucket, s3.prefix)));
+    }
     Ok(cfg.workspace.map(|p| p.display().to_string()))
 }
 
@@ -501,6 +586,9 @@ pub fn set_workspace(app: AppHandle, path: Option<String>) -> Result<(), FsError
         }
         _ => None,
     };
+    if cfg.workspace.is_some() {
+        cfg.s3_workspace = None;
+    }
     save_config(&app, &cfg).map_err(|e| FsError::Io(format!("config: {:?}", e)))?;
     Ok(())
 }

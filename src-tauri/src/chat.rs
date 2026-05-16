@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 const MODEL: &str = "claude-sonnet-4-6";
@@ -30,9 +31,13 @@ impl From<reqwest::Error> for ChatError {
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
-struct AppConfig {
+pub struct AppConfig {
     #[serde(default)]
-    anthropic_api_key: Option<String>,
+    pub anthropic_api_key: Option<String>,
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
+    #[serde(default)]
+    pub migrated_v4_local: bool,
 }
 
 fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, ChatError> {
@@ -44,7 +49,7 @@ fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, ChatError> {
     Ok(dir.join("config.json"))
 }
 
-fn load_config(app: &AppHandle) -> Result<AppConfig, ChatError> {
+pub fn load_config(app: &AppHandle) -> Result<AppConfig, ChatError> {
     let path = config_path(app)?;
     if !path.exists() {
         return Ok(AppConfig::default());
@@ -55,7 +60,7 @@ fn load_config(app: &AppHandle) -> Result<AppConfig, ChatError> {
         .map_err(|e| ChatError::Api(format!("config parse: {e}")))
 }
 
-fn save_config(app: &AppHandle, cfg: &AppConfig) -> Result<(), ChatError> {
+pub fn save_config(app: &AppHandle, cfg: &AppConfig) -> Result<(), ChatError> {
     let path = config_path(app)?;
     let raw = serde_json::to_string_pretty(cfg)
         .map_err(|e| ChatError::Api(format!("config encode: {e}")))?;

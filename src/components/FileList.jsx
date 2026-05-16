@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import Icon from './Icon.jsx';
-import { pathFor } from './FolderPickerDialog.jsx';
 
 export function timeAgo(ts) {
   if (!ts) return '—';
@@ -24,19 +23,15 @@ function formatSize(n) {
   return `${(n / 1000).toFixed(1)}K자`;
 }
 
-function WorkspacePicker({ items, workspaceId, onOpenDialog }) {
-  const current = items.find(it => it.id === workspaceId);
-  const pathDisplay = workspaceId
-    ? pathFor(items, workspaceId).join(' / ')
-    : null;
+function WorkspacePicker({ workspaceName, workspacePath, onOpenDialog }) {
   return (
     <button className="ws-picker-btn" onClick={onOpenDialog}>
       <Icon name="folder" size={14}/>
       <span className="ws-picker-label">
-        {current ? current.name : '작업 폴더 열기…'}
+        {workspaceName || '작업 폴더 열기…'}
       </span>
-      {current && (
-        <span className="ws-picker-path" title={pathDisplay}>{pathDisplay}</span>
+      {workspacePath && (
+        <span className="ws-picker-path" title={workspacePath}>{workspacePath}</span>
       )}
       <Icon name="caretDown" size={11}/>
     </button>
@@ -62,7 +57,7 @@ function EmptyWorkspace({ onPickClick }) {
 }
 
 export default function FileList({
-  items, workspaceId, currentFolderId, breadcrumb,
+  items, workspaceId, workspaceName, workspacePath, currentFolderId, breadcrumb,
   onEnter, onOpenFile, onUp, onJumpToWorkspace, onJumpTo,
   onOpenWorkspaceDialog,
   onNewFile, onNewFolder, onDelete, onRename,
@@ -73,7 +68,6 @@ export default function FileList({
   const [renameVal, setRenameVal] = useState('');
 
   const noWorkspace = !workspaceId;
-  const workspace = items.find(it => it.id === workspaceId);
 
   const childrenAll = items.filter(it => it.parent === currentFolderId);
 
@@ -116,8 +110,8 @@ export default function FileList({
         <div className="divider-v"></div>
 
         <WorkspacePicker
-          items={items}
-          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          workspacePath={workspacePath}
           onOpenDialog={onOpenWorkspaceDialog}
         />
 
@@ -127,7 +121,7 @@ export default function FileList({
             <button
               className={`bucket-seg ${currentFolderId === workspaceId ? 'current' : ''}`}
               onClick={() => onJumpToWorkspace()}
-            >{workspace?.name}</button>
+            >{workspaceName}</button>
             {breadcrumb.slice(1).map((b, i) => (
               <React.Fragment key={b.id}>
                 <span className="bucket-sep">/</span>
@@ -239,7 +233,9 @@ export default function FileList({
                   </div>
                   <div className="col col-type">{isFolder ? '폴더' : '문서'}</div>
                   <div className="col col-size">
-                    {isFolder ? `${childCount}개 항목` : formatSize((it.content || '').length)}
+                    {isFolder
+                      ? `${childCount}개 항목`
+                      : (typeof it.content === 'string' ? formatSize(it.content.length) : '—')}
                   </div>
                   <div className="col col-time">{timeAgo(it.updatedAt)}</div>
                   <div className="col col-actions">

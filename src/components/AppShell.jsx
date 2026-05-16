@@ -1,129 +1,167 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import FileList from './FileList.jsx';
-import FolderPickerDialog from './FolderPickerDialog.jsx';
 import Editor from './Editor.jsx';
 import Chat from './Chat.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 
-const STORAGE_KEY = 'thebooks.v4.items';
-const WORKSPACE_KEY = 'thebooks.v4.workspace';
+const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
+const LEGACY_WORKSPACE_KEY = 'thebooks.v4.workspace';
+const ROOT_ID = '__root__';
 
-function loadItems() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return seedItems();
-}
-function saveItems(items) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); } catch (e) {}
-}
-function loadWorkspace() {
-  try { return localStorage.getItem(WORKSPACE_KEY); } catch (e) {}
-  return null;
-}
-function saveWorkspace(id) {
-  try {
-    if (id) localStorage.setItem(WORKSPACE_KEY, id);
-    else localStorage.removeItem(WORKSPACE_KEY);
-  } catch (e) {}
+function basename(path) {
+  if (!path) return '';
+  const cleaned = path.replace(/[\\/]+$/, '');
+  const m = cleaned.match(/[^\\/]+$/);
+  return m ? m[0] : cleaned;
 }
 
-function seedItems() {
-  const now = Date.now();
-  return [
-    { id: 'd-essay',   type: 'folder', name: '에세이', parent: null, createdAt: now - 86400000*60, updatedAt: now - 86400000*2 },
-    { id: 'd-novel',   type: 'folder', name: '소설',   parent: null, createdAt: now - 86400000*45, updatedAt: now - 86400000*7 },
-    { id: 'd-memo',    type: 'folder', name: '메모',   parent: null, createdAt: now - 86400000*40, updatedAt: now - 86400000*14 },
-    { id: 'd-journal', type: 'folder', name: '일기',   parent: null, createdAt: now - 86400000*20, updatedAt: now - 86400000*1 },
-    { id: 'd-short',   type: 'folder', name: '단편',   parent: 'd-novel', createdAt: now - 86400000*30, updatedAt: now - 86400000*7 },
-
-    {
-      id: 'f-summer', type: 'file', name: '여름의 끝에서', parent: 'd-essay',
-      content:
-`매미 소리가 잦아들기 시작한 8월 말. 창문 너머로 들리던 그 끈질긴 울음이 사라지자, 동네는 갑자기 조용해졌다.
-
-나는 책상 앞에 앉아 한참을 가만히 있었다. 무언가 쓰려고 했지만, 글자는 손끝에서 멈춰 있었다.`,
-      margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-      createdAt: now - 86400000*3, updatedAt: now - 86400000*2,
-    },
-    {
-      id: 'f-walk', type: 'file', name: '산책에 대하여', parent: 'd-essay',
-      content: '걷기는 가장 오래된 사유 방식이다.',
-      margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-      createdAt: now - 86400000*10, updatedAt: now - 86400000*4,
-    },
-    {
-      id: 'f-spring', type: 'file', name: '서울 4월 메모', parent: 'd-memo',
-      content: `벚꽃이 지는 속도. 사람들이 그 아래에서 사진을 찍는 속도. 둘 다 비슷한 것 같다.`,
-      margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-      createdAt: now - 86400000*30, updatedAt: now - 86400000*14,
-    },
-    {
-      id: 'f-library', type: 'file', name: '도서관의 밤', parent: 'd-short',
-      content: '', margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-      createdAt: now - 86400000*7, updatedAt: now - 86400000*7,
-    },
-    {
-      id: 'f-today', type: 'file', name: '오늘의 기록', parent: 'd-journal',
-      content: '날씨가 좋았다.', margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-      createdAt: now - 86400000*1, updatedAt: now - 86400000*1,
-    },
-  ];
+function parentOf(id) {
+  if (!id || id === ROOT_ID) return null;
+  const idx = id.lastIndexOf('/');
+  return idx === -1 ? ROOT_ID : id.slice(0, idx);
 }
 
-function newFile(parent) {
-  const now = Date.now();
-  return {
-    id: 'f-' + now + '-' + Math.random().toString(36).slice(2, 6),
-    type: 'file', name: '', parent: parent || null,
-    content: '', margins: { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 },
-    createdAt: now, updatedAt: now,
+function pathSegments(id) {
+  if (!id || id === ROOT_ID) return [];
+  return id.split('/').filter(Boolean);
+}
+
+function buildItems(raw, workspaceName) {
+  const root = {
+    id: ROOT_ID,
+    type: 'folder',
+    name: workspaceName || '워크스페이스',
+    parent: null,
+    createdAt: 0,
+    updatedAt: 0,
   };
-}
-function newFolder(parent, name = '새 폴더') {
-  const now = Date.now();
-  return {
-    id: 'd-' + now + '-' + Math.random().toString(36).slice(2, 6),
-    type: 'folder', name, parent: parent || null,
-    createdAt: now, updatedAt: now,
-  };
+  const remapped = raw.map(it => ({
+    ...it,
+    parent: it.parent ? it.parent : ROOT_ID,
+  }));
+  return [root, ...remapped];
 }
 
 export default function AppShell() {
-  const [items, setItems] = useState(loadItems);
-  const [workspaceId, setWorkspaceIdInner] = useState(() => {
-    const stored = loadWorkspace();
-    return stored && loadItems().some(i => i.id === stored) ? stored : null;
-  });
-  const [currentFolderId, setCurrentFolderId] = useState(workspaceId);
+  const [workspacePath, setWorkspacePath] = useState(null);
+  const [items, setItems] = useState([]);
+  const [currentFolderId, setCurrentFolderId] = useState(null);
   const [openFileId, setOpenFileId] = useState(null);
   const [splitFileId, setSplitFileId] = useState(null);
   const [splitWidth, setSplitWidth] = useState(420);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const saveQueue = useRef(new Map());
 
-  function setWorkspaceId(id) {
-    setWorkspaceIdInner(id);
-    saveWorkspace(id);
-    setCurrentFolderId(id);
-    setOpenFileId(null);
+  const workspaceName = useMemo(() => basename(workspacePath), [workspacePath]);
+  const workspaceId = workspacePath ? ROOT_ID : null;
+
+  const refresh = useCallback(async (path) => {
+    const effectivePath = path !== undefined ? path : workspacePath;
+    if (!effectivePath) {
+      setItems([]);
+      return [];
+    }
+    try {
+      const raw = await invoke('list_workspace');
+      const next = buildItems(raw, basename(effectivePath));
+      setItems(prev => {
+        const contentById = new Map();
+        prev.forEach(it => {
+          if (it.type === 'file' && typeof it.content === 'string') {
+            contentById.set(it.id, it.content);
+          }
+        });
+        return next.map(it => {
+          if (it.type === 'file' && contentById.has(it.id)) {
+            return { ...it, content: contentById.get(it.id) };
+          }
+          return it;
+        });
+      });
+      setLoadError(null);
+      return raw;
+    } catch (e) {
+      setLoadError(typeof e === 'string' ? e : (e?.message || JSON.stringify(e)));
+      return [];
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ws = await invoke('get_workspace');
+        if (ws) {
+          setWorkspacePath(ws);
+          setCurrentFolderId(ROOT_ID);
+        }
+      } catch (e) {
+        setLoadError(e?.message || String(e));
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (workspacePath) refresh(workspacePath);
+  }, [workspacePath, refresh]);
+
+  async function maybeMigrate() {
+    let migrated;
+    try {
+      migrated = await invoke('is_migrated_v4_local');
+    } catch { migrated = false; }
+    if (migrated) return;
+    let raw;
+    try { raw = localStorage.getItem(LEGACY_STORAGE_KEY); } catch { return; }
+    if (!raw) return;
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { return; }
+    if (!Array.isArray(parsed) || parsed.length === 0) return;
+    let legacyWorkspaceId = null;
+    try { legacyWorkspaceId = localStorage.getItem(LEGACY_WORKSPACE_KEY); } catch {}
+    try {
+      await invoke('migrate_from_local', {
+        args: { items: parsed, workspaceId: legacyWorkspaceId },
+      });
+      try {
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_WORKSPACE_KEY);
+      } catch {}
+    } catch (e) {
+      setLoadError('마이그레이션 실패: ' + (e?.message || String(e)));
+    }
   }
 
-  useEffect(() => { saveItems(items); }, [items]);
+  async function pickWorkspace() {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (!selected || typeof selected !== 'string') return;
+      await invoke('set_workspace', { path: selected });
+      setWorkspacePath(selected);
+      setCurrentFolderId(ROOT_ID);
+      setOpenFileId(null);
+      setSplitFileId(null);
+      await maybeMigrate();
+      await refresh(selected);
+    } catch (e) {
+      setLoadError(e?.message || String(e));
+    }
+  }
 
   const breadcrumbForList = useMemo(() => {
     if (!workspaceId) return [];
-    const trail = [];
-    let id = currentFolderId;
-    while (id) {
-      const f = items.find(x => x.id === id);
-      if (!f) break;
-      trail.unshift({ id: f.id, name: f.name });
-      if (id === workspaceId) break;
-      id = f.parent;
+    const trail = [{ id: ROOT_ID, name: workspaceName || '워크스페이스' }];
+    if (currentFolderId && currentFolderId !== ROOT_ID) {
+      const segs = pathSegments(currentFolderId);
+      let acc = '';
+      segs.forEach(seg => {
+        acc = acc ? `${acc}/${seg}` : seg;
+        trail.push({ id: acc, name: seg });
+      });
     }
     return trail;
-  }, [items, currentFolderId, workspaceId]);
+  }, [workspaceId, workspaceName, currentFolderId]);
 
   const openFile = openFileId ? items.find(x => x.id === openFileId) : null;
   const splitFile = splitFileId ? items.find(x => x.id === splitFileId) : null;
@@ -133,57 +171,111 @@ export default function AppShell() {
 
   const editorBreadcrumb = useMemo(() => {
     if (!openFile) return [];
-    const trail = [];
-    let id = openFile.parent;
-    while (id) {
-      const f = items.find(x => x.id === id);
-      if (!f) break;
-      trail.unshift(f.name);
-      if (id === workspaceId) break;
-      id = f.parent;
+    if (!openFile.parent || openFile.parent === ROOT_ID) {
+      return [workspaceName || '워크스페이스'];
     }
-    return trail;
-  }, [items, openFile, workspaceId]);
+    return [workspaceName || '워크스페이스', ...pathSegments(openFile.parent)];
+  }, [openFile, workspaceName]);
+
+  async function ensureContent(id) {
+    const it = items.find(x => x.id === id);
+    if (!it || it.type !== 'file') return;
+    if (typeof it.content === 'string') return;
+    try {
+      const data = await invoke('read_file', { relPath: id });
+      setItems(arr => arr.map(x => x.id === id
+        ? { ...x, content: data.content, margins: data.margins, updatedAt: data.updatedAt }
+        : x));
+    } catch (e) {
+      setLoadError(e?.message || String(e));
+    }
+  }
+
+  async function openFileById(id) {
+    setOpenFileId(id);
+    await ensureContent(id);
+  }
+  async function openSplitById(id) {
+    setSplitFileId(id);
+    await ensureContent(id);
+  }
+
+  function scheduleWrite(id, patch) {
+    const existing = saveQueue.current.get(id);
+    if (existing) clearTimeout(existing.timer);
+    const it = items.find(x => x.id === id);
+    if (!it) return;
+    const title = patch.name !== undefined ? patch.name : it.name;
+    const content = patch.content !== undefined ? patch.content : (it.content || '');
+    const margins = patch.margins !== undefined ? patch.margins : (it.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
+    const createdAt = it.createdAt || Date.now();
+    const timer = setTimeout(async () => {
+      saveQueue.current.delete(id);
+      try {
+        await invoke('write_file', {
+          args: { relPath: id, content, margins, title, createdAt },
+        });
+      } catch (e) {
+        setLoadError('저장 실패: ' + (e?.message || String(e)));
+      }
+    }, 500);
+    saveQueue.current.set(id, { timer });
+  }
 
   function updateFile(id, patch) {
-    setItems(its => its.map(it => it.id === id ? { ...it, ...patch, updatedAt: Date.now() } : it));
+    setItems(its => its.map(it => it.id === id
+      ? { ...it, ...patch, updatedAt: Date.now() }
+      : it));
+    scheduleWrite(id, patch);
   }
 
-  function rename(id, name) {
-    setItems(its => its.map(it => it.id === id ? { ...it, name, updatedAt: Date.now() } : it));
-  }
-  function deleteItem(id) {
-    const toDelete = new Set();
-    function collect(t) {
-      toDelete.add(t);
-      items.forEach(it => { if (it.parent === t) collect(it.id); });
-    }
-    collect(id);
-    setItems(its => its.filter(it => !toDelete.has(it.id)));
-    if (openFileId && toDelete.has(openFileId)) setOpenFileId(null);
-    if (splitFileId && toDelete.has(splitFileId)) setSplitFileId(null);
-    if (toDelete.has(workspaceId)) {
-      setWorkspaceIdInner(null);
-      saveWorkspace(null);
-      setCurrentFolderId(null);
-    } else if (toDelete.has(currentFolderId)) {
-      setCurrentFolderId(workspaceId);
+  async function rename(id, name) {
+    try {
+      const res = await invoke('rename_item', { args: { relPath: id, newName: name } });
+      const newId = res.id;
+      if (newId !== id) {
+        if (openFileId === id) setOpenFileId(newId);
+        if (splitFileId === id) setSplitFileId(newId);
+        if (currentFolderId === id) setCurrentFolderId(newId);
+      }
+      await refresh();
+    } catch (e) {
+      setLoadError('이름 변경 실패: ' + (e?.message || String(e)));
     }
   }
-  function handleNewFile() {
-    const f = newFile(currentFolderId);
-    setItems(its => [f, ...its]);
-    setOpenFileId(f.id);
+
+  async function deleteItem(id) {
+    try {
+      await invoke('delete_item', { relPath: id });
+    } catch (e) {
+      setLoadError('삭제 실패: ' + (e?.message || String(e)));
+      return;
+    }
+    if (openFileId === id) setOpenFileId(null);
+    if (splitFileId === id) setSplitFileId(null);
+    if (currentFolderId === id) setCurrentFolderId(parentOf(id) || ROOT_ID);
+    await refresh();
   }
-  function handleNewFolder() {
-    const f = newFolder(currentFolderId);
-    setItems(its => [f, ...its]);
+
+  async function handleNewFile() {
+    const parent = currentFolderId === ROOT_ID ? null : currentFolderId;
+    try {
+      const res = await invoke('create_file', { args: { parent, name: '새 글' } });
+      await refresh();
+      setOpenFileId(res.id);
+      await ensureContent(res.id);
+    } catch (e) {
+      setLoadError('파일 생성 실패: ' + (e?.message || String(e)));
+    }
   }
-  function handleNewWorkspaceFromDialog() {
-    const name = prompt('새 폴더 이름:', '새 폴더');
-    if (!name) return;
-    const f = newFolder(null, name.trim());
-    setItems(its => [f, ...its]);
+  async function handleNewFolder() {
+    const parent = currentFolderId === ROOT_ID ? null : currentFolderId;
+    try {
+      await invoke('create_folder', { args: { parent, name: '새 폴더' } });
+      await refresh();
+    } catch (e) {
+      setLoadError('폴더 생성 실패: ' + (e?.message || String(e)));
+    }
   }
 
   return (
@@ -202,10 +294,11 @@ export default function AppShell() {
                 splitWidth={splitWidth}
                 onClose={() => setSplitFileId(null)}
                 onSwap={() => {
-                  setOpenFileId(splitFileId);
-                  setSplitFileId(openFileId);
+                  const a = openFileId, b = splitFileId;
+                  setOpenFileId(b);
+                  setSplitFileId(a);
                 }}
-                onChangeFile={(id) => setSplitFileId(id)}
+                onChangeFile={(id) => openSplitById(id)}
               />
               <SplitDivider onDrag={(deltaX) => {
                 setSplitWidth(w => Math.max(280, Math.min(window.innerWidth * 0.55, w + deltaX)));
@@ -219,7 +312,7 @@ export default function AppShell() {
             items={items}
             workspaceId={workspaceId}
             splitFileId={splitFileId}
-            onOpenSplit={(id) => setSplitFileId(id)}
+            onOpenSplit={(id) => openSplitById(id)}
             onCloseSplit={() => setSplitFileId(null)}
             onChange={(patch) => updateFile(openFile.id, patch)}
             onSaveNow={(patch) => updateFile(openFile.id, patch)}
@@ -231,18 +324,19 @@ export default function AppShell() {
         <FileList
           items={items}
           workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          workspacePath={workspacePath}
           currentFolderId={currentFolderId}
           breadcrumb={breadcrumbForList}
-          onOpenWorkspaceDialog={() => setDialogOpen(true)}
+          onOpenWorkspaceDialog={pickWorkspace}
           onEnter={(id) => setCurrentFolderId(id)}
-          onJumpToWorkspace={() => setCurrentFolderId(workspaceId)}
+          onJumpToWorkspace={() => setCurrentFolderId(ROOT_ID)}
           onUp={() => {
-            if (currentFolderId === workspaceId) return;
-            const cur = items.find(x => x.id === currentFolderId);
-            setCurrentFolderId(cur ? cur.parent : workspaceId);
+            if (currentFolderId === ROOT_ID) return;
+            setCurrentFolderId(parentOf(currentFolderId) || ROOT_ID);
           }}
           onJumpTo={(id) => setCurrentFolderId(id)}
-          onOpenFile={(id) => setOpenFileId(id)}
+          onOpenFile={(id) => openFileById(id)}
           onNewFile={handleNewFile}
           onNewFolder={handleNewFolder}
           onDelete={deleteItem}
@@ -250,14 +344,20 @@ export default function AppShell() {
         />
       )}
 
-      <FolderPickerDialog
-        open={dialogOpen}
-        items={items}
-        initialFolderId={workspaceId}
-        onCancel={() => setDialogOpen(false)}
-        onCreateAtRoot={handleNewWorkspaceFromDialog}
-        onSelect={(id) => { setDialogOpen(false); if (id) setWorkspaceId(id); }}
-      />
+      {loadError && (
+        <div style={{
+          position: 'fixed', bottom: 12, right: 12, maxWidth: 360,
+          background: '#fee', color: '#900', padding: '10px 14px',
+          borderRadius: 8, fontSize: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+          zIndex: 999,
+        }}>
+          {loadError}
+          <button
+            onClick={() => setLoadError(null)}
+            style={{ marginLeft: 8, background: 'transparent', border: 'none', color: '#900', cursor: 'pointer' }}
+          >닫기</button>
+        </div>
+      )}
     </div>
   );
 }

@@ -164,6 +164,13 @@ export default function Editor({
   function handleCompositionStart() {
     composingRef.current = true;
   }
+  function handleCompositionUpdate() {
+    // IME 조합 중간 단계의 페인트가 다음 키까지 보류되는 환경(WebKitGTK/WSLg 등)에서
+    // 한 글자가 한 템포 늦게 보이는 현상을 줄이는 안전 장치.
+    // setState 없이 layout만 한 번 강제로 읽어 페인트 큐가 진행되도록 유도.
+    if (!editableRef.current) return;
+    void editableRef.current.offsetHeight;
+  }
   function handleCompositionEnd() {
     composingRef.current = false;
     applyContentFromDOM();
@@ -405,6 +412,7 @@ export default function Editor({
               pageRef={pageRef}
               onInput={applyContentFromDOM}
               onCompositionStart={handleCompositionStart}
+              onCompositionUpdate={handleCompositionUpdate}
               onCompositionEnd={handleCompositionEnd}
               editorVars={editorVars}
             />
@@ -435,7 +443,7 @@ function SaveStatus({ saving, dirty, savedAt }) {
   );
 }
 
-function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionEnd, editorVars }) {
+function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionUpdate, onCompositionEnd, editorVars }) {
   return (
     <div className="page-stack" ref={pageRef}>
       <div className="page-sheet">
@@ -454,6 +462,7 @@ function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart,
         }}
         onInput={onInput}
         onCompositionStart={onCompositionStart}
+        onCompositionUpdate={onCompositionUpdate}
         onCompositionEnd={onCompositionEnd}
       />
     </div>

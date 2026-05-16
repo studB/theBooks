@@ -610,9 +610,13 @@ button { font-family: inherit; }
   position: absolute;
   inset: 0;
   background: white;
-  box-shadow: var(--shadow-md);
+  /* 페인트 비용이 큰 --shadow-md 스택 대신 단일 그림자 + 1px hairline border */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
   pointer-events: none;
   z-index: 1;
+  /* 별도 GPU 레이어로 격리해 .page-content 페인트 시 동반 재합성 방지 */
+  will-change: transform;
+  transform: translateZ(0);
 }
 .page-content {
   position: relative;
@@ -627,6 +631,14 @@ button { font-family: inherit; }
   white-space: pre-wrap;
   background: transparent;
   min-height: 1123px;
+  /* 페인트/레이아웃을 노드 내부로 격리해 input마다 외부 재계산 방지 */
+  contain: layout style paint;
+  will-change: contents;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  /* 본문 텍스트의 커닝/리거처 최적화 비활성화 — 페인트 단축. 가독성 회귀 시 이 줄만 롤백 */
+  text-rendering: optimizeSpeed;
+  -webkit-font-smoothing: antialiased;
 }
 .page-content:empty::before {
   content: attr(data-placeholder);

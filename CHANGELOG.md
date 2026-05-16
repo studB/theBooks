@@ -4,6 +4,7 @@ All notable changes to this project are recorded here. Newest entries on top.
 
 | Version | Date | Type | Summary |
 |---------|------|------|---------|
+| 0.10.1 | 2026-05-16 | perf | 에디터 페인트 비용 절감 및 한글 IME 한 템포 늦음 현상 수정 |
 | 0.10.0 | 2026-05-16 | feat | HWPX 텍스트 임포트 + 문서별 글꼴·글자크기·자간·행간 컨트롤 추가 |
 | 0.9.2 | 2026-05-16 | fix | 한글 IME 조합 깨짐 수정 + 스크롤·키 입력 핫패스에서 React 재렌더 제거 |
 | 0.9.1 | 2026-05-16 | perf | 에디터 후속 최적화 — ResizeObserver/rAF/SplitButton 메모화, 저장 디바운스 중복 제거 |

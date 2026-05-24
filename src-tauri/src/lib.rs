@@ -1,6 +1,7 @@
 mod chat;
 mod format;
 mod fs;
+mod git;
 mod hwp;
 mod s3;
 
@@ -36,6 +37,8 @@ pub fn run() {
             format::remove_format,
             format::get_default_format,
             hwp::import_hwp,
+            git::git_status_summary,
+            git::git_file_diff,
             s3::sync_workspace,
             s3::set_s3_workspace,
             s3::get_s3_workspace,

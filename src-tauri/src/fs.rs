@@ -243,16 +243,31 @@ fn write_md(path: &Path, title: &str, margins: &Margins, created_at: i64, body: 
     Ok(())
 }
 
+fn retry_eintr<T, F: FnMut() -> std::io::Result<T>>(mut f: F) -> std::io::Result<T> {
+    loop {
+        match f() {
+            Ok(v) => return Ok(v),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 fn collect_items(root: &Path, dir: &Path, out: &mut Vec<Item>) -> Result<(), FsError> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
+    let read_dir = retry_eintr(|| fs::read_dir(dir))?;
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e.into()),
+        };
         let path = entry.path();
         let name_os = entry.file_name();
         let raw_name = name_os.to_string_lossy().to_string();
         if raw_name.starts_with('.') {
             continue;
         }
-        let ft = entry.file_type()?;
+        let ft = retry_eintr(|| entry.file_type())?;
         if ft.is_dir() {
             let id = match to_rel_id(root, &path) {
                 Some(s) => s,
@@ -272,7 +287,7 @@ fn collect_items(root: &Path, dir: &Path, out: &mut Vec<Item>) -> Result<(), FsE
                 None => continue,
             };
             let (title, margins, created_at) = if is_md(&raw_name) {
-                let raw = fs::read_to_string(&path).unwrap_or_default();
+                let raw = retry_eintr(|| fs::read_to_string(&path)).unwrap_or_default();
                 let (fm, _) = parse_frontmatter(&raw);
                 let stem = path
                     .file_stem()

@@ -62,6 +62,7 @@ export default function FileList({
   onOpenWorkspaceDialog,
   onNewFile, onNewFolder, onImportHwp, onDelete, onRename,
   syncing, syncMessage, onSync,
+  gitStatus, gitLoading, onRefreshGit,
 }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('updated');
@@ -281,6 +282,77 @@ export default function FileList({
           </div>
         </>
       )}
+
+      {gitStatus && gitStatus.available && (
+        <GitPanel status={gitStatus} loading={gitLoading} onRefresh={onRefreshGit} />
+      )}
     </main>
+  );
+}
+
+function GitPanel({ status, loading, onRefresh }) {
+  const groups = useMemo(() => {
+    const added = [];
+    const modified = [];
+    const deleted = [];
+    const other = [];
+    for (const f of status.files) {
+      const code = f.status || '';
+      if (code.startsWith('?')) added.push(f);
+      else if (code.startsWith('A')) added.push(f);
+      else if (code.startsWith('D')) deleted.push(f);
+      else if (code.startsWith('M') || code.startsWith('R') || code.includes('M')) modified.push(f);
+      else other.push(f);
+    }
+    return { added, modified, deleted, other };
+  }, [status.files]);
+
+  const totalCount = status.files.length;
+  return (
+    <div className="git-panel">
+      <div className="git-panel-head">
+        <span className="git-panel-title">
+          <Icon name="branch" size={13}/>
+          <strong>{status.branch || 'git'}</strong>
+          <span className="caption">변경 {totalCount}개</span>
+        </span>
+        <button className="icon-btn" title="새로고침" onClick={onRefresh} disabled={loading}>
+          <Icon name="save" size={13}/>
+        </button>
+      </div>
+      {totalCount === 0 ? (
+        <div className="git-panel-empty caption">변경 사항 없음</div>
+      ) : (
+        <div className="git-panel-body">
+          <GitGroup label="추가" items={groups.added} tone="added" />
+          <GitGroup label="수정" items={groups.modified} tone="modified" />
+          <GitGroup label="삭제" items={groups.deleted} tone="deleted" />
+          {groups.other.length > 0 && (
+            <GitGroup label="기타" items={groups.other} tone="other" />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GitGroup({ label, items, tone }) {
+  if (!items.length) return null;
+  return (
+    <div className={`git-group git-group--${tone}`}>
+      <div className="git-group-head caption">{label} <span>{items.length}</span></div>
+      {items.map(f => (
+        <div className="git-row" key={f.path} title={f.path}>
+          <span className={`git-status-chip git-status-chip--${tone}`}>{f.status}</span>
+          <span className="git-row-path">{f.path}</span>
+          {(f.added > 0 || f.removed > 0) && (
+            <span className="git-row-numstat caption">
+              {f.added > 0 && <span className="git-num-add">+{f.added}</span>}
+              {f.removed > 0 && <span className="git-num-rm">−{f.removed}</span>}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }

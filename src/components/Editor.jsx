@@ -30,11 +30,6 @@ function fontStackFor(value) {
   return f ? f.stack : FONT_OPTIONS[0].stack;
 }
 
-function clamp(n, lo, hi) {
-  if (Number.isNaN(n)) return lo;
-  return Math.max(lo, Math.min(hi, n));
-}
-
 function readAutosavePref() {
   try { return localStorage.getItem(AUTOSAVE_KEY) === 'on'; }
   catch { return false; }
@@ -49,11 +44,16 @@ export default function Editor({
   onChange,
   onExit,
   onSaveNow,
+  onRenameFile,
   workspaceId,
+  workspacePath,
   items,
   splitFileId,
   onOpenSplit,
   onCloseSplit,
+  gitStatus,
+  gitLoading,
+  onRefreshGit,
 }) {
   const [title, setTitle] = useState(file.name || '');
   const [margins, setMargins] = useState(file.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
@@ -70,12 +70,11 @@ export default function Editor({
   const contentRef = useRef(file.content || '');
   const composingRef = useRef(false);
   const savingRef = useRef(false);
+  const committingRef = useRef(false);
   const touchedRef = useRef(false);
 
   const rulerHRef = useRef(null);
-  const rulerVRef = useRef(null);
   const rulerHInnerRef = useRef(null);
-  const rulerVInnerRef = useRef(null);
   const pageRef = useRef(null);
   const scrollRef = useRef(null);
   const editableRef = useRef(null);
@@ -83,16 +82,12 @@ export default function Editor({
   const saveTimer = useRef(null);
 
   const recompute = useCallback(() => {
-    if (!pageRef.current || !rulerHRef.current || !rulerVRef.current) return;
-    if (!rulerHInnerRef.current || !rulerVInnerRef.current) return;
+    if (!pageRef.current || !rulerHRef.current) return;
+    if (!rulerHInnerRef.current) return;
     const pageR = pageRef.current.getBoundingClientRect();
     const hR = rulerHRef.current.getBoundingClientRect();
-    const vR = rulerVRef.current.getBoundingClientRect();
-    const scrollTop = scrollRef.current ? scrollRef.current.scrollTop : 0;
     const pageLeft = pageR.left - hR.left;
-    const pageTop = pageR.top - vR.top;
     rulerHInnerRef.current.style.transform = `translateX(${pageLeft}px)`;
-    rulerVInnerRef.current.style.transform = `translateY(${pageTop - scrollTop}px)`;
   }, []);
 
   const scheduleRecompute = useCallback(() => {
@@ -125,6 +120,11 @@ export default function Editor({
     }
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      if (committingRef.current) {
+        savingRef.current = false;
+        setSaving(false);
+        return;
+      }
       const latest = editableRef.current ? editableRef.current.innerText : contentRef.current;
       contentRef.current = latest;
       onChange({ name: title, content: latest, margins });
@@ -233,11 +233,31 @@ export default function Editor({
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    onSaveNow({ name: title, content: latest, margins });
+    const p = onSaveNow({ name: title, content: latest, margins });
     setSavedAt(Date.now());
     savingRef.current = false;
     setSaving(false);
     setDirty(false);
+    return p;
+  }
+
+  async function commitTitle() {
+    if (committingRef.current) return;
+    const next = title.trim();
+    if (!next) {
+      setTitle(file.name || '');
+      return;
+    }
+    if (next === (file.name || '')) return;
+    committingRef.current = true;
+    try {
+      await manualSave();
+      if (onRenameFile) await onRenameFile(file.id, next);
+    } catch (e) {
+      // rename/save surface their own errors; keep editor stable
+    } finally {
+      committingRef.current = false;
+    }
   }
 
   function toggleAutosave() {
@@ -274,24 +294,6 @@ export default function Editor({
     return out;
   }, []);
 
-  const vTicks = useMemo(() => {
-    const out = [];
-    for (let cm = 0; cm <= PAGE_H_CM; cm++) {
-      const y = cm * PX_PER_CM;
-      out.push(<div key={'M'+cm} className="tick major" style={{ top: y }} />);
-      if (cm > 0) {
-        out.push(<div key={'L'+cm} className="ruler-label" style={{ top: y }}>{cm}</div>);
-      }
-      if (cm < PAGE_H_CM) {
-        for (let mm = 2; mm < 10; mm += 2) {
-          const ym = (cm + mm / 10) * PX_PER_CM;
-          out.push(<div key={'m'+cm+'-'+mm} className="tick minor" style={{ top: ym }} />);
-        }
-      }
-    }
-    return out;
-  }, []);
-
   function startDrag(axis, side) {
     return (downEvent) => {
       downEvent.preventDefault();
@@ -321,8 +323,6 @@ export default function Editor({
 
   const hLeftX  = margins.left * PX_PER_CM;
   const hRightX = (PAGE_W_CM - margins.right) * PX_PER_CM;
-  const vTopY   = margins.top * PX_PER_CM;
-  const vBotY   = (PAGE_H_CM - margins.bottom) * PX_PER_CM;
 
   const showUnsaved = !autosave && dirty;
 
@@ -349,6 +349,11 @@ export default function Editor({
           value={title}
           placeholder="제목 없음"
           onChange={(e) => { setTitle(e.target.value); markDirtyIfOff(); }}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+            if (e.key === 'Escape') { setTitle(file.name || ''); e.currentTarget.blur(); }
+          }}
         />
 
         <FormatControls fmt={fmt} onChange={setFmt} />
@@ -376,14 +381,25 @@ export default function Editor({
           onCloseSplit={onCloseSplit}
         />
 
-        <button className={`btn primary ${showUnsaved ? 'urgent' : ''}`} onClick={manualSave}>
+        <button
+          className={`btn primary ${showUnsaved ? 'urgent' : ''}`}
+          onClick={() => { if (!committingRef.current) manualSave(); }}
+        >
           <Icon name="save" size={14}/>저장
         </button>
       </div>
 
-      <div className="editor-wrap">
-        <div className="ruler-corner">cm</div>
+      {gitStatus && gitStatus.available && (
+        <GitEditorBar
+          status={gitStatus}
+          loading={gitLoading}
+          onRefresh={onRefreshGit}
+          currentPath={file.id}
+          workspacePath={workspacePath}
+        />
+      )}
 
+      <div className="editor-wrap">
         <div className="ruler-h" ref={rulerHRef}>
           <div className="ruler-inner" ref={rulerHInnerRef}>
             <div className="margin-zone" style={{ left: 0, width: margins.left * PX_PER_CM }}></div>
@@ -391,16 +407,6 @@ export default function Editor({
             {hTicks}
             <div className="margin-handle" style={{ left: hLeftX }} onMouseDown={startDrag('h', 'left')} title={`왼쪽 여백 ${margins.left}cm`}></div>
             <div className="margin-handle" style={{ left: hRightX }} onMouseDown={startDrag('h', 'right')} title={`오른쪽 여백 ${margins.right}cm`}></div>
-          </div>
-        </div>
-
-        <div className="ruler-v" ref={rulerVRef}>
-          <div className="ruler-inner" ref={rulerVInnerRef}>
-            <div className="margin-zone" style={{ top: 0, height: margins.top * PX_PER_CM }}></div>
-            <div className="margin-zone" style={{ top: vBotY, height: margins.bottom * PX_PER_CM }}></div>
-            {vTicks}
-            <div className="margin-handle" style={{ top: vTopY }} onMouseDown={startDrag('v', 'top')} title={`위 여백 ${margins.top}cm`}></div>
-            <div className="margin-handle" style={{ top: vBotY }} onMouseDown={startDrag('v', 'bottom')} title={`아래 여백 ${margins.bottom}cm`}></div>
           </div>
         </div>
 
@@ -421,6 +427,131 @@ export default function Editor({
       </div>
     </main>
   );
+}
+
+const GIT_BAR_EXPANDED_KEY = 'thebooks.git.bar.expanded';
+
+function readGitBarExpanded() {
+  try { return localStorage.getItem(GIT_BAR_EXPANDED_KEY) === '1'; }
+  catch { return false; }
+}
+function writeGitBarExpanded(on) {
+  try { localStorage.setItem(GIT_BAR_EXPANDED_KEY, on ? '1' : '0'); } catch {}
+}
+
+function GitEditorBar({ status, loading, onRefresh, currentPath, workspacePath }) {
+  const [expanded, setExpanded] = useState(readGitBarExpanded);
+  const [diff, setDiff] = useState('');
+  const [diffLoading, setDiffLoading] = useState(false);
+  const currentFile = useMemo(
+    () => status.files.find(f => f.path === currentPath) || null,
+    [status.files, currentPath],
+  );
+
+  function toggle() {
+    setExpanded(prev => {
+      const next = !prev;
+      writeGitBarExpanded(next);
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!expanded || !currentFile || !workspacePath) {
+      setDiff('');
+      return;
+    }
+    let alive = true;
+    setDiffLoading(true);
+    invoke('git_file_diff', { workspacePath, relPath: currentPath })
+      .then(text => { if (alive) setDiff(text || ''); })
+      .catch(() => { if (alive) setDiff(''); })
+      .finally(() => { if (alive) setDiffLoading(false); });
+    return () => { alive = false; };
+  }, [expanded, workspacePath, currentPath, currentFile, status.files]);
+
+  if (!currentFile) {
+    return null;
+  }
+
+  const isUntracked = (currentFile.status || '').startsWith('?');
+
+  return (
+    <div className={`git-bar ${expanded ? 'git-bar--open' : ''}`}>
+      <button className="git-bar-head" onClick={toggle} title={expanded ? '접기' : '펼치기'}>
+        <span className="git-bar-chev">{expanded ? '▾' : '▸'}</span>
+        <Icon name="branch" size={12} />
+        <strong>{status.branch || 'git'}</strong>
+        <span className={`git-status-chip git-status-chip--${chipTone(currentFile.status)}`}>{currentFile.status}</span>
+        <span className="git-bar-cur-name">이 파일 변경됨</span>
+        {(currentFile.added > 0 || currentFile.removed > 0) && (
+          <span className="git-bar-cur-numstat caption">
+            {currentFile.added > 0 && <span className="git-num-add">+{currentFile.added}</span>}
+            {currentFile.removed > 0 && <span className="git-num-rm"> −{currentFile.removed}</span>}
+          </span>
+        )}
+        <span className="git-bar-spacer"></span>
+        <button
+          className="icon-btn"
+          title="새로고침"
+          onClick={(e) => { e.stopPropagation(); onRefresh(); }}
+          disabled={loading || diffLoading}
+        >
+          <Icon name="save" size={12} />
+        </button>
+      </button>
+      {expanded && (
+        <div className="git-bar-diff">
+          {diffLoading ? (
+            <div className="caption" style={{ padding: '8px 12px' }}>diff 불러오는 중…</div>
+          ) : isUntracked ? (
+            <div className="caption" style={{ padding: '8px 12px' }}>아직 git에 추적되지 않은 파일입니다.</div>
+          ) : diff.trim() === '' ? (
+            <div className="caption" style={{ padding: '8px 12px' }}>diff 없음</div>
+          ) : (
+            <DiffView text={diff} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffView({ text }) {
+  const lines = useMemo(() => {
+    const out = [];
+    for (const raw of text.split('\n')) {
+      if (raw.startsWith('diff --git') || raw.startsWith('index ')
+          || raw.startsWith('--- ') || raw.startsWith('+++ ')
+          || raw.startsWith('new file mode') || raw.startsWith('deleted file mode')
+          || raw.startsWith('similarity index') || raw.startsWith('rename from')
+          || raw.startsWith('rename to')) {
+        continue;
+      }
+      let cls = 'diff-ctx';
+      if (raw.startsWith('@@')) cls = 'diff-hunk';
+      else if (raw.startsWith('+')) cls = 'diff-add';
+      else if (raw.startsWith('-')) cls = 'diff-rm';
+      out.push({ cls, text: raw });
+    }
+    return out;
+  }, [text]);
+
+  return (
+    <pre className="diff-pre">
+      {lines.map((ln, i) => (
+        <div key={i} className={`diff-line ${ln.cls}`}>{ln.text || ' '}</div>
+      ))}
+    </pre>
+  );
+}
+
+function chipTone(code) {
+  const c = code || '';
+  if (c.startsWith('?') || c.startsWith('A')) return 'added';
+  if (c.startsWith('D')) return 'deleted';
+  if (c.startsWith('M') || c.startsWith('R') || c.includes('M')) return 'modified';
+  return 'other';
 }
 
 function SaveStatus({ saving, dirty, savedAt }) {
@@ -469,6 +600,44 @@ function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart,
   );
 }
 
+function StepperInput({ value, min, max, step, onCommit }) {
+  const [draft, setDraft] = useState(String(value));
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) {
+      setDraft(String(value));
+    }
+  }, [value]);
+
+  function handleChange(e) {
+    const next = e.target.value;
+    setDraft(next);
+    const n = parseFloat(next);
+    if (Number.isFinite(n) && n >= min && n <= max) {
+      onCommit(n);
+    }
+  }
+
+  function handleBlur() {
+    const n = parseFloat(draft);
+    if (!Number.isFinite(n) || n < min || n > max) {
+      setDraft(String(value));
+    }
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="number"
+      min={min} max={max} step={step}
+      value={draft}
+      onChange={handleChange}
+      onBlur={handleBlur}
+    />
+  );
+}
+
 function FormatControls({ fmt, onChange }) {
   function patch(p) { onChange(prev => ({ ...prev, ...p })); }
   return (
@@ -485,29 +654,26 @@ function FormatControls({ fmt, onChange }) {
       </select>
       <div className="fmt-stepper" title="글자 크기 (px)">
         <span className="fmt-icon" aria-hidden>가</span>
-        <input
-          type="number"
-          min={8} max={48} step={0.5}
+        <StepperInput
           value={fmt.fontSize}
-          onChange={(e) => patch({ fontSize: clamp(parseFloat(e.target.value), 8, 48) })}
+          min={8} max={48} step={0.5}
+          onCommit={(v) => patch({ fontSize: v })}
         />
       </div>
       <div className="fmt-stepper" title="자간 (px)">
         <span className="fmt-icon" aria-hidden>↔</span>
-        <input
-          type="number"
-          min={-2} max={5} step={0.1}
+        <StepperInput
           value={fmt.letterSpacing}
-          onChange={(e) => patch({ letterSpacing: clamp(parseFloat(e.target.value), -2, 5) })}
+          min={-2} max={5} step={0.1}
+          onCommit={(v) => patch({ letterSpacing: v })}
         />
       </div>
       <div className="fmt-stepper" title="행간 (배수)">
         <span className="fmt-icon" aria-hidden>↕</span>
-        <input
-          type="number"
-          min={1.0} max={3.0} step={0.05}
+        <StepperInput
           value={fmt.lineHeight}
-          onChange={(e) => patch({ lineHeight: clamp(parseFloat(e.target.value), 1.0, 3.0) })}
+          min={1.0} max={3.0} step={0.05}
+          onCommit={(v) => patch({ lineHeight: v })}
         />
       </div>
     </div>

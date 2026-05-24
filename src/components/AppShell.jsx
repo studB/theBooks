@@ -6,10 +6,20 @@ import Editor from './Editor.jsx';
 import Chat from './Chat.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 import WorkspacePickerModal from './WorkspacePickerModal.jsx';
+import useGitStatus from '../hooks/useGitStatus.js';
 
 const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
 const LEGACY_WORKSPACE_KEY = 'thebooks.v4.workspace';
+const CHAT_COLLAPSED_KEY = 'thebooks.chat.collapsed';
 const ROOT_ID = '__root__';
+
+function readChatCollapsedPref() {
+  try { return localStorage.getItem(CHAT_COLLAPSED_KEY) === '1'; }
+  catch { return false; }
+}
+function writeChatCollapsedPref(on) {
+  try { localStorage.setItem(CHAT_COLLAPSED_KEY, on ? '1' : '0'); } catch {}
+}
 
 function basename(path) {
   if (!path) return '';
@@ -52,7 +62,16 @@ export default function AppShell() {
   const [openFileId, setOpenFileId] = useState(null);
   const [splitFileId, setSplitFileId] = useState(null);
   const [splitWidth, setSplitWidth] = useState(420);
+  const [chatCollapsed, setChatCollapsed] = useState(readChatCollapsedPref);
   const [loadError, setLoadError] = useState(null);
+
+  const toggleChat = useCallback(() => {
+    setChatCollapsed(prev => {
+      const next = !prev;
+      writeChatCollapsedPref(next);
+      return next;
+    });
+  }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -62,6 +81,7 @@ export default function AppShell() {
   const workspaceKind = workspacePath
     ? (workspacePath.startsWith('s3://') ? 's3' : 'local')
     : null;
+  const { gitStatus, gitLoading, refreshGit } = useGitStatus(workspacePath, workspaceKind);
   const workspaceName = useMemo(() => {
     if (!workspacePath) return '';
     if (workspaceKind === 's3') {
@@ -118,8 +138,14 @@ export default function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (workspacePath) refresh(workspacePath);
-  }, [workspacePath, refresh]);
+    if (!workspacePath) return;
+    let alive = true;
+    (async () => {
+      await refresh(workspacePath);
+      if (alive) refreshGit();
+    })();
+    return () => { alive = false; };
+  }, [workspacePath, refresh, refreshGit]);
 
   useEffect(() => {
     if (workspaceKind === 's3' && !autoSyncedRef.current) {
@@ -298,6 +324,7 @@ export default function AppShell() {
       await invoke('write_file', {
         args: { relPath: id, content, margins, title, createdAt },
       });
+      refreshGit();
     } catch (e) {
       setLoadError('저장 실패: ' + (e?.message || String(e)));
     }
@@ -307,19 +334,37 @@ export default function AppShell() {
     setItems(its => its.map(it => it.id === id
       ? { ...it, ...patch, updatedAt: Date.now() }
       : it));
-    writeNow(id, patch);
+    return writeNow(id, patch);
   }
 
   async function rename(id, name) {
     try {
       const res = await invoke('rename_item', { args: { relPath: id, newName: name } });
       const newId = res.id;
+      const wasOpen = openFileId === id;
+      const wasSplit = splitFileId === id;
       if (newId !== id) {
-        if (openFileId === id) setOpenFileId(newId);
-        if (splitFileId === id) setSplitFileId(newId);
+        // Carry over the in-memory content/margins from the old id to the new id
+        // BEFORE flipping openFileId. Otherwise the Editor remounts (key=file.id)
+        // with an empty file.content and shows a blank buffer until the user
+        // re-opens the file. Functional updater reads the latest state (which
+        // includes the just-saved content from commitTitle's manualSave).
+        setItems(arr => {
+          const oldItem = arr.find(x => x.id === id);
+          if (!oldItem) return arr;
+          return arr
+            .filter(x => x.id !== id)
+            .concat({ ...oldItem, id: newId, name, updatedAt: Date.now() });
+        });
+        if (wasOpen) setOpenFileId(newId);
+        if (wasSplit) setSplitFileId(newId);
         if (currentFolderId === id) setCurrentFolderId(newId);
       }
       await refresh();
+      if (newId !== id && (wasOpen || wasSplit)) {
+        await ensureContent(newId);
+      }
+      refreshGit();
     } catch (e) {
       setLoadError('이름 변경 실패: ' + (e?.message || String(e)));
     }
@@ -381,7 +426,7 @@ export default function AppShell() {
 
   return (
     <div
-      className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''}`}
+      className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''} ${openFile && chatCollapsed ? 'chat-collapsed' : ''}`}
       style={splitFileId ? { '--split-width': splitWidth + 'px' } : null}
     >
       {openFile ? (
@@ -412,14 +457,19 @@ export default function AppShell() {
             breadcrumb={editorBreadcrumb}
             items={items}
             workspaceId={workspaceId}
+            workspacePath={workspacePath}
             splitFileId={splitFileId}
             onOpenSplit={(id) => openSplitById(id)}
             onCloseSplit={() => setSplitFileId(null)}
             onChange={(patch) => updateFile(openFile.id, patch)}
             onSaveNow={(patch) => updateFile(openFile.id, patch)}
             onExit={() => { setSplitFileId(null); setOpenFileId(null); }}
+            onRenameFile={rename}
+            gitStatus={gitStatus}
+            gitLoading={gitLoading}
+            onRefreshGit={refreshGit}
           />
-          <Chat file={openFile} refFile={splitFile} />
+          <Chat file={openFile} refFile={splitFile} collapsed={chatCollapsed} onToggle={toggleChat} />
         </>
       ) : (
         <FileList
@@ -447,6 +497,9 @@ export default function AppShell() {
           syncing={syncing}
           syncMessage={syncMessage}
           onSync={() => runSync({ silent: false })}
+          gitStatus={gitStatus}
+          gitLoading={gitLoading}
+          onRefreshGit={refreshGit}
         />
       )}
 

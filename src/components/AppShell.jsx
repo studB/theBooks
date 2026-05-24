@@ -403,27 +403,6 @@ export default function AppShell() {
       setLoadError('폴더 생성 실패: ' + (e?.message || String(e)));
     }
   }
-  async function handleImportHwp() {
-    try {
-      const picked = await openDialog({
-        multiple: false,
-        directory: false,
-        filters: [{ name: '한글 문서', extensions: ['hwpx', 'hwp'] }],
-      });
-      if (!picked) return;
-      const srcPath = typeof picked === 'string' ? picked : picked.path;
-      const res = await invoke('import_hwp', { srcPath });
-      await refresh();
-      if (res?.relPath) {
-        setOpenFileId(res.relPath);
-        await ensureContent(res.relPath);
-      }
-    } catch (e) {
-      const msg = e?.message || e?.kind || (typeof e === 'string' ? e : JSON.stringify(e));
-      setLoadError('HWP 가져오기 실패: ' + msg);
-    }
-  }
-
   return (
     <div
       className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''} ${openFile && chatCollapsed ? 'chat-collapsed' : ''}`}
@@ -491,7 +470,6 @@ export default function AppShell() {
           onOpenFile={(id) => openFileById(id)}
           onNewFile={handleNewFile}
           onNewFolder={handleNewFolder}
-          onImportHwp={handleImportHwp}
           onDelete={deleteItem}
           onRename={rename}
           syncing={syncing}

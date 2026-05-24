@@ -2,7 +2,6 @@ mod chat;
 mod format;
 mod fs;
 mod git;
-mod hwp;
 mod s3;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -36,7 +35,6 @@ pub fn run() {
             format::set_format,
             format::remove_format,
             format::get_default_format,
-            hwp::import_hwp,
             git::git_status_summary,
             git::git_file_diff,
             s3::sync_workspace,

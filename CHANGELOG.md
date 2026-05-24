@@ -4,6 +4,7 @@ All notable changes to this project are recorded here. Newest entries on top.
 
 | Version | Date | Type | Summary |
 |---------|------|------|---------|
+| 0.12.0 | 2026-05-24 | feat | HWP 임포트 제거, 워크스페이스 수정시간 표시 버그 수정, ReferencePane GFM 마크다운 렌더링 도입 |
 | 0.11.0 | 2026-05-24 | feat | 채팅 패널 토글, 좌측 눈금자 제거, 분할 좌측 스크롤, git 변경 감지 패널 + 편집기 diff, 제목 rename |
 | 0.10.2 | 2026-05-24 | fix | 글자 크기/자간/행간 스테퍼에서 두 자리 이상 자유롭게 지울 수 없던 입력 버그 수정 |
 | 0.10.1 | 2026-05-16 | perf | 에디터 페인트 비용 절감 및 한글 IME 한 템포 늦음 현상 수정 |

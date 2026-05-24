@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import Icon from './Icon.jsx';
 
 export default function ReferencePane({ file, onClose, onSwap, onChangeFile, items, workspaceId, splitWidth }) {
@@ -69,9 +71,18 @@ export default function ReferencePane({ file, onClose, onSwap, onChangeFile, ite
       <div className="ref-scroll">
         <div className="ref-page">
           <div className="ref-page-title">{file.name || '제목 없음'}</div>
-          <div className="ref-page-content">
+          <div className="ref-page-content markdown-body">
             {file.content
-              ? file.content
+              ? (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+                  }}
+                >
+                  {file.content}
+                </ReactMarkdown>
+              )
               : <span className="ref-empty">비어있는 글입니다.</span>}
           </div>
         </div>

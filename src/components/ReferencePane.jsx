@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import Icon from './Icon.jsx';
 
 export default function ReferencePane({ file, onClose, onSwap, onChangeFile, items, workspaceId, splitWidth }) {
@@ -75,7 +76,7 @@ export default function ReferencePane({ file, onClose, onSwap, onChangeFile, ite
             {file.content
               ? (
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
                   components={{
                     a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
                   }}

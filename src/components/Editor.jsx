@@ -74,6 +74,17 @@ export default function Editor({
   const savingRef = useRef(false);
   const committingRef = useRef(false);
   const touchedRef = useRef(false);
+  const [counts, setCounts] = useState(() => computeCounts(file.content || ''));
+  const countsTimerRef = useRef(null);
+  const scheduleCountsUpdate = useCallback(() => {
+    if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
+    countsTimerRef.current = setTimeout(() => {
+      setCounts(computeCounts(contentRef.current || ''));
+    }, 150);
+  }, []);
+  useEffect(() => () => {
+    if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
+  }, []);
 
   const rulerHRef = useRef(null);
   const rulerHInnerRef = useRef(null);
@@ -156,6 +167,7 @@ export default function Editor({
     if (composingRef.current) return;
     if (!editableRef.current) return;
     contentRef.current = editableRef.current.innerText;
+    scheduleCountsUpdate();
     if (autosaveRef.current) {
       scheduleAutosave();
     } else {
@@ -360,6 +372,8 @@ export default function Editor({
 
         <FormatControls fmt={fmt} onChange={setFmt} />
 
+        <CharCountBadge counts={counts} />
+
         <div className="topbar-spacer"></div>
 
         <button
@@ -563,6 +577,25 @@ function chipTone(code) {
   if (c.startsWith('D')) return 'deleted';
   if (c.startsWith('M') || c.startsWith('R') || c.includes('M')) return 'modified';
   return 'other';
+}
+
+const CHAR_NF = new Intl.NumberFormat('ko-KR');
+
+function computeCounts(text) {
+  const t = text || '';
+  const total = Array.from(t).length;
+  const noSpace = Array.from(t.replace(/\s+/g, '')).length;
+  return { total, noSpace };
+}
+
+function CharCountBadge({ counts }) {
+  return (
+    <div className="char-count-badge" title="공백 포함 / 공백 제외 글자수">
+      <span className="char-count-total">{CHAR_NF.format(counts.total)}자</span>
+      <span className="char-count-sep">·</span>
+      <span className="char-count-nospace">공백 제외 {CHAR_NF.format(counts.noSpace)}자</span>
+    </div>
+  );
 }
 
 function SaveStatus({ saving, dirty, savedAt }) {

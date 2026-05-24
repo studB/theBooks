@@ -4918,7 +4918,7 @@ dependencies = [
 
 [[package]]
 name = "thebooks"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "aws-credential-types",
  "aws-sdk-s3",

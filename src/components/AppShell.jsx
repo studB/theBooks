@@ -6,6 +6,7 @@ import Editor from './Editor.jsx';
 import Chat from './Chat.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 import WorkspacePickerModal from './WorkspacePickerModal.jsx';
+import CommandPalette from './CommandPalette.jsx';
 import useGitStatus from '../hooks/useGitStatus.js';
 
 const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
@@ -74,6 +75,7 @@ export default function AppShell() {
   }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerBusy, setPickerBusy] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState(null);
   const autoSyncedRef = useRef(false);
@@ -153,6 +155,17 @@ export default function AppShell() {
       runSync({ silent: false });
     }
   }, [workspaceKind]);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setPaletteOpen(prev => !prev);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   async function maybeMigrate() {
     let migrated;
@@ -487,6 +500,19 @@ export default function AppShell() {
         onClose={() => setPickerOpen(false)}
         onPickLocal={pickLocalFromModal}
         onPickS3={pickS3FromModal}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onPickFile={async (relPath) => {
+          setPaletteOpen(false);
+          try {
+            await openFileById(relPath);
+          } catch (e) {
+            setLoadError(describeOpenError(e));
+          }
+        }}
       />
 
       {loadError && (

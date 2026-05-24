@@ -3,6 +3,7 @@ mod format;
 mod fs;
 mod git;
 mod s3;
+mod search;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -40,6 +41,7 @@ pub fn run() {
             s3::sync_workspace,
             s3::set_s3_workspace,
             s3::get_s3_workspace,
+            search::search_workspace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

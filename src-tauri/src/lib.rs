@@ -1,3 +1,4 @@
+mod analyze;
 mod chat;
 mod format;
 mod fs;
@@ -42,6 +43,7 @@ pub fn run() {
             s3::set_s3_workspace,
             s3::get_s3_workspace,
             search::search_workspace,
+            analyze::analyze_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

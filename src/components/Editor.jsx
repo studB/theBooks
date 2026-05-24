@@ -54,6 +54,8 @@ export default function Editor({
   gitStatus,
   gitLoading,
   onRefreshGit,
+  analysisOpen,
+  onToggleAnalysis,
 }) {
   const [title, setTitle] = useState(file.name || '');
   const [margins, setMargins] = useState(file.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
@@ -359,6 +361,15 @@ export default function Editor({
         <FormatControls fmt={fmt} onChange={setFmt} />
 
         <div className="topbar-spacer"></div>
+
+        <button
+          type="button"
+          className={`btn ghost ${analysisOpen ? 'is-active' : ''}`}
+          onClick={onToggleAnalysis}
+          title={analysisOpen ? '분석 패널 닫기' : '본문 분석'}
+        >
+          <Icon name="sparkles" size={13}/>분석
+        </button>
 
         <button
           type="button"

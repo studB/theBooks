@@ -7,6 +7,7 @@ import Chat from './Chat.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 import WorkspacePickerModal from './WorkspacePickerModal.jsx';
 import CommandPalette from './CommandPalette.jsx';
+import AnalysisPanel from './AnalysisPanel.jsx';
 import useGitStatus from '../hooks/useGitStatus.js';
 
 const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
@@ -64,6 +65,7 @@ export default function AppShell() {
   const [splitFileId, setSplitFileId] = useState(null);
   const [splitWidth, setSplitWidth] = useState(420);
   const [chatCollapsed, setChatCollapsed] = useState(readChatCollapsedPref);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   const [loadError, setLoadError] = useState(null);
 
   const toggleChat = useCallback(() => {
@@ -418,7 +420,7 @@ export default function AppShell() {
   }
   return (
     <div
-      className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''} ${openFile && chatCollapsed ? 'chat-collapsed' : ''}`}
+      className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''} ${openFile && chatCollapsed ? 'chat-collapsed' : ''} ${openFile && analysisOpen ? 'with-analysis' : ''}`}
       style={splitFileId ? { '--split-width': splitWidth + 'px' } : null}
     >
       {openFile ? (
@@ -460,7 +462,12 @@ export default function AppShell() {
             gitStatus={gitStatus}
             gitLoading={gitLoading}
             onRefreshGit={refreshGit}
+            analysisOpen={analysisOpen}
+            onToggleAnalysis={() => setAnalysisOpen(o => !o)}
           />
+          {analysisOpen && (
+            <AnalysisPanel file={openFile} onClose={() => setAnalysisOpen(false)} />
+          )}
           <Chat file={openFile} refFile={splitFile} collapsed={chatCollapsed} onToggle={toggleChat} />
         </>
       ) : (

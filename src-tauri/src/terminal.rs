@@ -100,15 +100,40 @@ pub fn terminal_open(
         let output_event = format!("terminal://output/{id_for_thread}");
         let exit_event = format!("terminal://exit/{id_for_thread}");
         let mut buf = [0u8; 4096];
+        let mut leftover: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = app_for_thread.emit(&output_event, chunk);
+                    leftover.extend_from_slice(&buf[..n]);
+                    let (emit_len, keep_len) = match std::str::from_utf8(&leftover) {
+                        Ok(_) => (leftover.len(), 0usize),
+                        Err(e) => {
+                            let v = e.valid_up_to();
+                            if e.error_len().is_none() {
+                                (v, leftover.len() - v)
+                            } else {
+                                (leftover.len(), 0)
+                            }
+                        }
+                    };
+                    if emit_len > 0 {
+                        let chunk =
+                            String::from_utf8_lossy(&leftover[..emit_len]).into_owned();
+                        let _ = app_for_thread.emit(&output_event, chunk);
+                    }
+                    if keep_len == 0 {
+                        leftover.clear();
+                    } else {
+                        leftover.drain(..emit_len);
+                    }
                 }
                 Err(_) => break,
             }
+        }
+        if !leftover.is_empty() {
+            let chunk = String::from_utf8_lossy(&leftover).into_owned();
+            let _ = app_for_thread.emit(&output_event, chunk);
         }
         let _ = app_for_thread.emit(&exit_event, ());
         SESSIONS.lock().unwrap().remove(&id_for_thread);

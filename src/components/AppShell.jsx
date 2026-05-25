@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import FileList from './FileList.jsx';
 import Editor from './Editor.jsx';
-import Chat from './Chat.jsx';
+import SidePanel from './SidePanel.jsx';
 import ReferencePane, { SplitDivider } from './ReferencePane.jsx';
 import WorkspacePickerModal from './WorkspacePickerModal.jsx';
 import CommandPalette from './CommandPalette.jsx';
@@ -13,7 +13,33 @@ import useGitStatus from '../hooks/useGitStatus.js';
 const LEGACY_STORAGE_KEY = 'thebooks.v4.items';
 const LEGACY_WORKSPACE_KEY = 'thebooks.v4.workspace';
 const CHAT_COLLAPSED_KEY = 'thebooks.chat.collapsed';
+const SIDE_PANEL_MODE_KEY = 'thebooks.sidePanel.mode';
+const SIDE_PANEL_WIDTH_KEY = 'thebooks.sidePanel.width';
+const SIDE_PANEL_MIN_WIDTH = 240;
+const SIDE_PANEL_MAX_WIDTH = 900;
+const SIDE_PANEL_DEFAULT_WIDTH = 320;
 const ROOT_ID = '__root__';
+
+function readSidePanelWidth() {
+  try {
+    const v = parseInt(localStorage.getItem(SIDE_PANEL_WIDTH_KEY) || '', 10);
+    if (Number.isFinite(v) && v >= SIDE_PANEL_MIN_WIDTH) return v;
+  } catch {}
+  return SIDE_PANEL_DEFAULT_WIDTH;
+}
+function writeSidePanelWidth(w) {
+  try { localStorage.setItem(SIDE_PANEL_WIDTH_KEY, String(w)); } catch {}
+}
+
+function readSidePanelMode() {
+  try {
+    const v = localStorage.getItem(SIDE_PANEL_MODE_KEY);
+    return v === 'terminal' ? 'terminal' : 'chat';
+  } catch { return 'chat'; }
+}
+function writeSidePanelMode(mode) {
+  try { localStorage.setItem(SIDE_PANEL_MODE_KEY, mode); } catch {}
+}
 
 function readChatCollapsedPref() {
   try { return localStorage.getItem(CHAT_COLLAPSED_KEY) === '1'; }
@@ -67,6 +93,23 @@ export default function AppShell() {
   const [chatCollapsed, setChatCollapsed] = useState(readChatCollapsedPref);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [sidePanelMode, setSidePanelModeState] = useState(readSidePanelMode);
+  const [sidePanelWidth, setSidePanelWidth] = useState(readSidePanelWidth);
+  const [terminalSessionId, setTerminalSessionId] = useState(null);
+
+  const handleSidePanelResize = useCallback((deltaX) => {
+    setSidePanelWidth(prev => {
+      const max = Math.min(SIDE_PANEL_MAX_WIDTH, Math.floor(window.innerWidth * 0.7));
+      const next = Math.max(SIDE_PANEL_MIN_WIDTH, Math.min(max, prev - deltaX));
+      writeSidePanelWidth(next);
+      return next;
+    });
+  }, []);
+
+  const setSidePanelMode = useCallback((mode) => {
+    setSidePanelModeState(mode);
+    writeSidePanelMode(mode);
+  }, []);
 
   const toggleChat = useCallback(() => {
     setChatCollapsed(prev => {
@@ -157,6 +200,14 @@ export default function AppShell() {
       runSync({ silent: false });
     }
   }, [workspaceKind]);
+
+  useEffect(() => {
+    if (!openFileId && terminalSessionId) {
+      const id = terminalSessionId;
+      setTerminalSessionId(null);
+      invoke('terminal_close', { sessionId: id }).catch(() => {});
+    }
+  }, [openFileId, terminalSessionId]);
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -421,7 +472,10 @@ export default function AppShell() {
   return (
     <div
       className={`app ${openFile ? 'with-chat' : ''} ${splitFileId ? 'with-split' : ''} ${openFile && chatCollapsed ? 'chat-collapsed' : ''} ${openFile && analysisOpen ? 'with-analysis' : ''}`}
-      style={splitFileId ? { '--split-width': splitWidth + 'px' } : null}
+      style={{
+        '--chat-width': sidePanelWidth + 'px',
+        ...(splitFileId ? { '--split-width': splitWidth + 'px' } : null),
+      }}
     >
       {openFile ? (
         <>
@@ -468,7 +522,20 @@ export default function AppShell() {
           {analysisOpen && (
             <AnalysisPanel file={openFile} onClose={() => setAnalysisOpen(false)} />
           )}
-          <Chat file={openFile} refFile={splitFile} collapsed={chatCollapsed} onToggle={toggleChat} />
+          <SidePanel
+            mode={sidePanelMode}
+            onChangeMode={setSidePanelMode}
+            collapsed={chatCollapsed}
+            onToggle={toggleChat}
+            onResize={handleSidePanelResize}
+            terminalEnabled={workspaceKind === 'local' && !!workspacePath}
+            terminalCwd={workspaceKind === 'local' ? workspacePath : ''}
+            terminalSessionId={terminalSessionId}
+            onTerminalSession={setTerminalSessionId}
+            onTerminalClosed={() => setTerminalSessionId(null)}
+            file={openFile}
+            refFile={splitFile}
+          />
         </>
       ) : (
         <FileList

@@ -5,6 +5,7 @@ mod fs;
 mod git;
 mod s3;
 mod search;
+mod terminal;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -44,6 +45,10 @@ pub fn run() {
             s3::get_s3_workspace,
             search::search_workspace,
             analyze::analyze_text,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

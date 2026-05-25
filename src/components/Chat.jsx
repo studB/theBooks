@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import Icon from './Icon.jsx';
 
-export default function Chat({ file, refFile, collapsed = false, onToggle }) {
+export default function Chat({ file, refFile, collapsed = false, onToggle, embedded = false }) {
   const fileName = (file && file.name) || '제목 없는 글';
   const refName = refFile && (refFile.name || '제목 없는 글');
   const [messages, setMessages] = useState([
@@ -99,7 +99,7 @@ export default function Chat({ file, refFile, collapsed = false, onToggle }) {
     { t: '요약', s: '지금까지 쓴 내용을 3줄로' },
   ];
 
-  if (collapsed) {
+  if (collapsed && !embedded) {
     return (
       <aside className="chat chat--collapsed">
         <button
@@ -113,16 +113,21 @@ export default function Chat({ file, refFile, collapsed = false, onToggle }) {
     );
   }
 
+  const Wrap = embedded ? 'div' : 'aside';
+  const wrapClass = embedded ? 'chat chat--embedded' : 'chat';
+
   return (
-    <aside className="chat">
-      <button
-        className="chat-toggle chat-toggle--collapse"
-        title="채팅 접기"
-        onClick={onToggle}
-        aria-label="채팅 접기"
-      >
-        ›
-      </button>
+    <Wrap className={wrapClass}>
+      {!embedded && (
+        <button
+          className="chat-toggle chat-toggle--collapse"
+          title="채팅 접기"
+          onClick={onToggle}
+          aria-label="채팅 접기"
+        >
+          ›
+        </button>
+      )}
       <div className="chat-head">
         <div className="chat-head-title" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -223,6 +228,6 @@ export default function Chat({ file, refFile, collapsed = false, onToggle }) {
           </div>
         </div>
       </div>
-    </aside>
+    </Wrap>
   );
 }

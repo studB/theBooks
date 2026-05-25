@@ -1,6 +1,6 @@
 [package]
 name = "thebooks"
-version = "0.14.2"
+version = "0.15.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -32,4 +32,6 @@ blake3 = "1"
 walkdir = "2"
 filetime = "0.2"
 tokio = { version = "1", features = ["fs", "io-util", "process", "macros", "rt"] }
+portable-pty = "0.8"
+once_cell = "1"
 

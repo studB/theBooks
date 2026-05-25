@@ -361,6 +361,10 @@ button { font-family: inherit; }
   width: 100% !important;
 }
 .terminal-wrap .xterm-viewport { background: #1e1e1e !important; }
+/* IME helper textarea position is managed in JS (Terminal.jsx) via inline
+   styles so xterm.js's own updateCompositionElements (which sets inline
+   left/top/width/height during composition) can still override at the
+   cursor position. */
 
 /* ============== Main area ============== */
 .main {

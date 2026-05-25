@@ -45,6 +45,16 @@ export default function SidePanel({
   file,
   refFile,
 }) {
+  const effectiveMode = mode === 'terminal' && !terminalEnabled ? 'chat' : mode;
+  const [terminalEverShown, setTerminalEverShown] = useState(
+    effectiveMode === 'terminal' && terminalEnabled
+  );
+  useEffect(() => {
+    if (effectiveMode === 'terminal' && terminalEnabled) {
+      setTerminalEverShown(true);
+    }
+  }, [effectiveMode, terminalEnabled]);
+
   if (collapsed) {
     return (
       <aside className="chat chat--collapsed">
@@ -58,16 +68,6 @@ export default function SidePanel({
       </aside>
     );
   }
-
-  const effectiveMode = mode === 'terminal' && !terminalEnabled ? 'chat' : mode;
-  const [terminalEverShown, setTerminalEverShown] = useState(
-    effectiveMode === 'terminal' && terminalEnabled
-  );
-  useEffect(() => {
-    if (effectiveMode === 'terminal' && terminalEnabled) {
-      setTerminalEverShown(true);
-    }
-  }, [effectiveMode, terminalEnabled]);
 
   return (
     <aside className="chat side-panel">

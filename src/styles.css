@@ -798,6 +798,10 @@ button { font-family: inherit; }
   background: #fdecec;
   color: #9b1c1c;
 }
+.reload-banner--ok {
+  background: #eaf7ee;
+  color: #1f6b34;
+}
 .reload-banner .btn {
   flex: 0 0 auto;
 }

@@ -3,6 +3,7 @@ mod chat;
 mod format;
 mod fs;
 mod git;
+mod pdf;
 mod s3;
 mod search;
 mod terminal;
@@ -49,6 +50,8 @@ pub fn run() {
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            pdf::read_pdf_font,
+            pdf::save_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

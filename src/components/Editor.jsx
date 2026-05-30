@@ -111,6 +111,10 @@ export default function Editor({
   const [reloadConflict, setReloadConflict] = useState(false);
   const [reloadError, setReloadError] = useState('');
 
+  // PDF 내보내기 결과 알림 ({ type: 'ok' | 'error', text })
+  const [pdfMsg, setPdfMsg] = useState(null);
+  const [exporting, setExporting] = useState(false);
+
   const recompute = useCallback(() => {
     if (!pageRef.current || !rulerHRef.current) return;
     if (!rulerHInnerRef.current) return;
@@ -374,6 +378,7 @@ export default function Editor({
   useEffect(() => {
     setReloadConflict(false);
     setReloadError('');
+    setPdfMsg(null);
   }, [file.id]);
 
   function applyContentFromDOM() {
@@ -487,9 +492,21 @@ export default function Editor({
     }
   }
 
-  function handleExportPdf() {
+  async function handleExportPdf() {
+    if (exporting) return;
     const content = editableRef.current ? editableRef.current.innerText : (contentRef.current || file.content || '');
-    exportPdf({ title: (title || file.name || '제목 없음').trim(), content, margins });
+    setPdfMsg(null);
+    setExporting(true);
+    try {
+      const saved = await exportPdf({ title: (title || file.name || '제목 없음').trim(), content, margins });
+      // saved === null 이면 사용자가 저장 대화상자를 취소한 것 — 알림 없음
+      if (saved) setPdfMsg({ type: 'ok', text: `PDF로 저장했습니다: ${saved}` });
+    } catch (e) {
+      const detail = e?.message || (typeof e === 'string' ? e : JSON.stringify(e));
+      setPdfMsg({ type: 'error', text: `PDF 저장 실패: ${detail}` });
+    } finally {
+      setExporting(false);
+    }
   }
 
   function toggleAutosave() {
@@ -608,9 +625,10 @@ export default function Editor({
             type="button"
             className="btn ghost"
             onClick={handleExportPdf}
+            disabled={exporting}
             title="PDF로 내보내기"
           >
-            <Icon name="download" size={13}/>PDF
+            <Icon name="download" size={13}/>{exporting ? 'PDF 생성 중…' : 'PDF'}
           </button>
 
           <button
@@ -668,6 +686,12 @@ export default function Editor({
         <div className="reload-banner reload-banner--error">
           <span className="reload-banner-msg">다시 불러오기 실패: {reloadError}</span>
           <button className="btn ghost" onClick={() => setReloadError('')}>닫기</button>
+        </div>
+      )}
+      {pdfMsg && (
+        <div className={`reload-banner ${pdfMsg.type === 'error' ? 'reload-banner--error' : 'reload-banner--ok'}`}>
+          <span className="reload-banner-msg">{pdfMsg.text}</span>
+          <button className="btn ghost" onClick={() => setPdfMsg(null)}>닫기</button>
         </div>
       )}
 

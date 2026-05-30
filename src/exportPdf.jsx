@@ -1,107 +1,110 @@
-import { createRoot } from 'react-dom/client';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkBreaks from 'remark-breaks';
+import { invoke } from '@tauri-apps/api/core';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 
-const DEFAULT_MARGINS = { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 };
+// 에디터 본문(단순 텍스트)을 프런트에서 직접 A4 PDF로 생성한다.
+// WKWebView에서 window.print()가 동작하지 않으므로 인쇄 대화상자 의존을 제거했다.
+// 한글 폰트는 Rust(read_pdf_font)에서 시스템 TTF 바이트를 받아 pdf-lib가 "사용된 글자만
+// 서브셋" 임베드한다(전체 폰트 임베드 시 수십 MB가 되는 문제 회피). 저장은 Rust(save_pdf)가
+// 저장 대화상자를 띄워 처리한다.
 
-function esc(s) {
-  return String(s || '').replace(/[&<>"]/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
-  ));
+const A4_W = 595.28; // pt (210mm)
+const A4_H = 841.89; // pt (297mm)
+const CM = 28.3464567; // 1cm in pt
+const BODY_SIZE = 11;
+const TITLE_SIZE = 18;
+const LINE_GAP = 1.5;
+
+let fontCache = null;
+async function loadFontBytes() {
+  if (fontCache) return fontCache;
+  const buf = await invoke('read_pdf_font'); // ArrayBuffer (ipc::Response)
+  fontCache = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf);
+  return fontCache;
 }
 
-function printCss(margins) {
-  const m = { ...DEFAULT_MARGINS, ...(margins || {}) };
-  return `
-@page { size: A4; margin: ${m.top}cm ${m.right}cm ${m.bottom}cm ${m.left}cm; }
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-body {
-  font-family: "Apple SD Gothic Neo", "Noto Sans KR", system-ui, -apple-system, sans-serif;
-  font-size: 11pt;
-  line-height: 1.7;
-  color: #1a1a1a;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-}
-.pdf-title { font-size: 18pt; font-weight: 700; margin: 0 0 18px; line-height: 1.3; }
-h1, h2, h3, h4, h5, h6 { font-weight: 700; line-height: 1.3; margin: 1.4em 0 0.5em; page-break-after: avoid; }
-h1 { font-size: 16pt; }
-h2 { font-size: 14pt; }
-h3 { font-size: 12.5pt; }
-h4, h5, h6 { font-size: 11pt; }
-p { margin: 0 0 0.8em; }
-ul, ol { margin: 0 0 0.8em; padding-left: 1.6em; }
-li { margin: 0.2em 0; }
-blockquote { margin: 0 0 0.8em; padding: 0.2em 0 0.2em 1em; border-left: 3px solid #ccc; color: #555; }
-pre { background: #f5f5f5; padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 9.5pt; line-height: 1.5; page-break-inside: avoid; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; font-size: 0.92em; }
-pre code { background: none; padding: 0; }
-:not(pre) > code { background: #f0f0f0; padding: 1px 4px; border-radius: 4px; }
-table { border-collapse: collapse; width: 100%; margin: 0 0 0.8em; page-break-inside: avoid; }
-th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
-th { background: #f5f5f5; font-weight: 700; }
-img { max-width: 100%; }
-a { color: #1a1a1a; text-decoration: underline; }
-hr { border: none; border-top: 1px solid #ddd; margin: 1.6em 0; }
-`;
-}
+// 반환값: 저장된 경로(string) — 사용자가 취소하면 null. 실패 시 throw.
+export async function exportPdf({ title, content, margins }) {
+  const fontBytes = await loadFontBytes();
 
-export function exportPdf({ title, content, margins }) {
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
-  document.body.appendChild(iframe);
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+  const font = await pdfDoc.embedFont(fontBytes, { subset: true });
+  const cleanTitle = (title || '').trim();
+  if (cleanTitle) pdfDoc.setTitle(cleanTitle);
 
-  const doc = iframe.contentDocument;
-  doc.open();
-  doc.write(
-    `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">` +
-    `<title>${esc(title || '문서')}</title>` +
-    `<style>${printCss(margins)}</style></head>` +
-    `<body><div id="pdf-root"></div></body></html>`
-  );
-  doc.close();
+  const m = { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5, ...(margins || {}) };
+  const ml = m.left * CM;
+  const mt = m.top * CM;
+  const mb = m.bottom * CM;
+  const maxWidth = A4_W - ml - m.right * CM;
 
-  const mount = doc.getElementById('pdf-root');
-  const root = createRoot(mount);
-  root.render(
-    <>
-      {title ? <div className="pdf-title">{title}</div> : null}
-      <div className="markdown-body">
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-          {content || ''}
-        </ReactMarkdown>
-      </div>
-    </>
-  );
+  // 글자 폭 캐시 (한글은 단어 경계가 없어 글자 단위로 줄바꿈)
+  const wcache = new Map();
+  const charWidth = (ch, size) => {
+    const key = size + ':' + ch;
+    let w = wcache.get(key);
+    if (w === undefined) {
+      w = font.widthOfTextAtSize(ch, size);
+      wcache.set(key, w);
+    }
+    return w;
+  };
 
-  const win = iframe.contentWindow;
-  let cleaned = false;
-  let fallbackTimer = null;
-  function cleanup() {
-    if (cleaned) return;
-    cleaned = true;
-    if (fallbackTimer) clearTimeout(fallbackTimer);
-    try { root.unmount(); } catch {}
-    try { iframe.remove(); } catch {}
+  // 한 논리 줄을 maxWidth에 맞춰 시각적 줄들로 분할
+  function wrap(text, size) {
+    if (text === '') return [''];
+    const out = [];
+    let cur = '';
+    let curW = 0;
+    for (const ch of text) {
+      const w = charWidth(ch, size);
+      if (curW + w > maxWidth && cur !== '') {
+        out.push(cur);
+        cur = ch;
+        curW = w;
+      } else {
+        cur += ch;
+        curW += w;
+      }
+    }
+    out.push(cur);
+    return out;
   }
 
-  win.addEventListener('afterprint', cleanup);
-
-  // React render is async; wait two frames so layout/fonts settle before print.
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    try {
-      win.focus();
-      win.print();
-    } catch {
-      cleanup();
-      return;
+  // 그릴 시각 줄 목록 구성
+  const lines = [];
+  if (cleanTitle) {
+    for (const vl of wrap(cleanTitle, TITLE_SIZE)) lines.push({ text: vl, size: TITLE_SIZE });
+    lines.push({ text: '', size: BODY_SIZE }); // 제목과 본문 사이 여백
+  }
+  const normalized = (content || '').replace(/\t/g, '    ').replace(/\r\n?/g, '\n');
+  for (const logical of normalized.split('\n')) {
+    if (logical === '') {
+      lines.push({ text: '', size: BODY_SIZE });
+      continue;
     }
-    // afterprint may not fire if the dialog is dismissed without printing.
-    fallbackTimer = setTimeout(cleanup, 60000);
-  }));
+    for (const vl of wrap(logical, BODY_SIZE)) lines.push({ text: vl, size: BODY_SIZE });
+  }
+
+  // 페이지네이션 + 그리기
+  const color = rgb(0.1, 0.1, 0.1);
+  let page = pdfDoc.addPage([A4_W, A4_H]);
+  let y = A4_H - mt;
+  for (const ln of lines) {
+    const lh = ln.size * LINE_GAP;
+    if (y - lh < mb) {
+      page = pdfDoc.addPage([A4_W, A4_H]);
+      y = A4_H - mt;
+    }
+    y -= lh;
+    if (ln.text !== '') {
+      page.drawText(ln.text, { x: ml, y, size: ln.size, font, color });
+    }
+  }
+
+  const bytes = await pdfDoc.save(); // Uint8Array (서브셋 폰트 포함 — 작음)
+  return await invoke('save_pdf', {
+    args: { bytes: Array.from(bytes), defaultName: cleanTitle || '문서' },
+  });
 }

@@ -93,8 +93,18 @@ export default function Editor({
   const pageRef = useRef(null);
   const scrollRef = useRef(null);
   const editableRef = useRef(null);
+  const mainRef = useRef(null);
   const rafIdRef = useRef(null);
   const saveTimer = useRef(null);
+
+  // 문서 내 찾기(Ctrl+F)
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [matchCount, setMatchCount] = useState(0);
+  const [activeMatch, setActiveMatch] = useState(0);
+  const findInputRef = useRef(null);
+  const findTimerRef = useRef(null);
+  const matchRangesRef = useRef([]);
 
   const recompute = useCallback(() => {
     if (!pageRef.current || !rulerHRef.current) return;
@@ -164,6 +174,140 @@ export default function Editor({
   function markDirtyIfOff() {
     if (!autosaveRef.current) setDirty(true);
   }
+
+  // --- 문서 내 찾기 ---------------------------------------------------------
+  const supportsHighlight = typeof CSS !== 'undefined' && !!CSS.highlights;
+
+  const clearFindHighlights = useCallback(() => {
+    if (!supportsHighlight) return;
+    CSS.highlights.delete('tb-find');
+    CSS.highlights.delete('tb-find-active');
+  }, [supportsHighlight]);
+
+  const scrollRangeIntoView = useCallback((range) => {
+    const scroller = scrollRef.current;
+    if (!scroller || !range) return;
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+    const sRect = scroller.getBoundingClientRect();
+    const pad = 80;
+    if (rect.top < sRect.top + pad) {
+      scroller.scrollTop -= (sRect.top + pad) - rect.top;
+    } else if (rect.bottom > sRect.bottom - pad) {
+      scroller.scrollTop += rect.bottom - (sRect.bottom - pad);
+    }
+  }, []);
+
+  const paintActive = useCallback((idx) => {
+    if (!supportsHighlight) return;
+    const range = matchRangesRef.current[idx];
+    if (range) {
+      CSS.highlights.set('tb-find-active', new Highlight(range));
+      scrollRangeIntoView(range);
+    } else {
+      CSS.highlights.delete('tb-find-active');
+    }
+  }, [supportsHighlight, scrollRangeIntoView]);
+
+  const runFind = useCallback((query) => {
+    const root = editableRef.current;
+    const q = (query || '');
+    if (!root || !q) {
+      matchRangesRef.current = [];
+      setMatchCount(0);
+      setActiveMatch(0);
+      clearFindHighlights();
+      return;
+    }
+    const needle = q.toLowerCase();
+    const ranges = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.nodeValue;
+      if (!text) continue;
+      const hay = text.toLowerCase();
+      let from = 0;
+      let at;
+      while ((at = hay.indexOf(needle, from)) !== -1) {
+        const range = document.createRange();
+        range.setStart(node, at);
+        range.setEnd(node, at + needle.length);
+        ranges.push(range);
+        from = at + needle.length;
+      }
+    }
+    matchRangesRef.current = ranges;
+    setMatchCount(ranges.length);
+    const nextActive = ranges.length ? 0 : 0;
+    setActiveMatch(nextActive);
+    if (supportsHighlight) {
+      if (ranges.length) CSS.highlights.set('tb-find', new Highlight(...ranges));
+      else CSS.highlights.delete('tb-find');
+    }
+    paintActive(nextActive);
+  }, [clearFindHighlights, paintActive, supportsHighlight]);
+
+  // 입력 디바운스
+  useEffect(() => {
+    if (!findOpen) return;
+    if (findTimerRef.current) clearTimeout(findTimerRef.current);
+    findTimerRef.current = setTimeout(() => {
+      findTimerRef.current = null;
+      runFind(findQuery);
+    }, 120);
+    return () => { if (findTimerRef.current) clearTimeout(findTimerRef.current); };
+  }, [findQuery, findOpen, runFind]);
+
+  function gotoMatch(delta) {
+    const total = matchRangesRef.current.length;
+    if (!total) return;
+    setActiveMatch(prev => {
+      const next = (prev + delta + total) % total;
+      paintActive(next);
+      return next;
+    });
+  }
+
+  function openFind() {
+    setFindOpen(true);
+    requestAnimationFrame(() => {
+      if (findInputRef.current) {
+        findInputRef.current.focus();
+        findInputRef.current.select();
+      }
+    });
+  }
+
+  function closeFind() {
+    setFindOpen(false);
+    clearFindHighlights();
+    matchRangesRef.current = [];
+    setMatchCount(0);
+    setActiveMatch(0);
+  }
+
+  // Ctrl/Cmd+F — 에디터 영역 안에서만 동작 (터미널/사이드패널과 충돌 방지)
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    function onKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        openFind();
+      }
+    }
+    el.addEventListener('keydown', onKeyDown);
+    return () => el.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // 파일이 바뀌면 찾기 닫기
+  useEffect(() => {
+    closeFind();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file.id]);
+
+  useEffect(() => () => clearFindHighlights(), [clearFindHighlights]);
 
   function applyContentFromDOM() {
     if (composingRef.current) return;
@@ -348,7 +492,7 @@ export default function Editor({
   const showUnsaved = !autosave && dirty;
 
   return (
-    <main className="main">
+    <main className="main" ref={mainRef}>
       <div className="topbar">
         <div className="topbar-left">
           <button className="topbar-back" onClick={onExit}>
@@ -445,6 +589,19 @@ export default function Editor({
       )}
 
       <div className="editor-wrap">
+        {findOpen && (
+          <FindBar
+            inputRef={findInputRef}
+            query={findQuery}
+            onQueryChange={setFindQuery}
+            matchCount={matchCount}
+            activeMatch={activeMatch}
+            supported={supportsHighlight}
+            onPrev={() => gotoMatch(-1)}
+            onNext={() => gotoMatch(1)}
+            onClose={closeFind}
+          />
+        )}
         <div className="ruler-h" ref={rulerHRef}>
           <div className="ruler-inner" ref={rulerHInnerRef}>
             <div className="margin-zone" style={{ left: 0, width: margins.left * PX_PER_CM }}></div>
@@ -482,6 +639,44 @@ function readGitBarExpanded() {
 }
 function writeGitBarExpanded(on) {
   try { localStorage.setItem(GIT_BAR_EXPANDED_KEY, on ? '1' : '0'); } catch {}
+}
+
+function FindBar({ inputRef, query, onQueryChange, matchCount, activeMatch, supported, onPrev, onNext, onClose }) {
+  function handleKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) onPrev(); else onNext();
+    }
+  }
+  const hasQuery = query.length > 0;
+  return (
+    <div className="find-bar" role="search">
+      <Icon name="search" size={13} />
+      <input
+        ref={inputRef}
+        className="find-bar-input"
+        type="text"
+        value={query}
+        placeholder="문서에서 찾기"
+        spellCheck={false}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={handleKey}
+      />
+      <span className="find-bar-count caption">
+        {!supported ? '미지원' : !hasQuery ? '' : matchCount === 0 ? '결과 없음' : `${activeMatch + 1}/${matchCount}`}
+      </span>
+      <button className="icon-btn" title="이전 (Shift+Enter)" onClick={onPrev} disabled={matchCount === 0}>
+        <Icon name="chevronLeft" size={13} />
+      </button>
+      <button className="icon-btn" title="다음 (Enter)" onClick={onNext} disabled={matchCount === 0}>
+        <Icon name="chevronRight" size={13} />
+      </button>
+      <button className="icon-btn" title="닫기 (Esc)" onClick={onClose}>
+        <Icon name="x" size={13} />
+      </button>
+    </div>
+  );
 }
 
 function GitEditorBar({ status, loading, onRefresh, currentPath, workspacePath }) {

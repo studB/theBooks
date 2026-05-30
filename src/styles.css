@@ -737,6 +737,53 @@ button { font-family: inherit; }
   grid-template-columns: 1fr;
   grid-template-rows: 24px minmax(0, 1fr);
   background: var(--gray-50);
+  position: relative;
+}
+
+/* 문서 내 찾기 바 */
+.find-bar {
+  position: absolute;
+  top: 32px;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px 5px 10px;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: var(--gray-500);
+}
+.find-bar-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--gray-700);
+  width: 180px;
+  padding: 2px 4px;
+}
+.find-bar-count {
+  min-width: 52px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-right: 2px;
+}
+.find-bar .icon-btn:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* 찾기 하이라이트 (CSS Custom Highlight API — DOM 비파괴) */
+::highlight(tb-find) {
+  background-color: rgba(255, 213, 0, 0.4);
+}
+::highlight(tb-find-active) {
+  background-color: rgba(255, 145, 0, 0.7);
+  color: var(--gray-700);
 }
 .ruler-h {
   background: var(--white);

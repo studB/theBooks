@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useLayoutEffect, useCallback, useMe
 import { invoke } from '@tauri-apps/api/core';
 import Icon from './Icon.jsx';
 import { timeAgo } from './FileList.jsx';
+import { exportPdf } from '../exportPdf.jsx';
+import FilePicker from './FilePicker.jsx';
 
 const PX_PER_CM = 37.795;
 const PAGE_W_CM = 21;
@@ -274,6 +276,11 @@ export default function Editor({
     }
   }
 
+  function handleExportPdf() {
+    const content = editableRef.current ? editableRef.current.innerText : (contentRef.current || file.content || '');
+    exportPdf({ title: (title || file.name || '제목 없음').trim(), content, margins });
+  }
+
   function toggleAutosave() {
     const next = !autosave;
     if (next && editableRef.current) {
@@ -383,6 +390,15 @@ export default function Editor({
           title={analysisOpen ? '분석 패널 닫기' : '본문 분석'}
         >
           <Icon name="sparkles" size={13}/>분석
+        </button>
+
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={handleExportPdf}
+          title="PDF로 내보내기"
+        >
+          <Icon name="download" size={13}/>PDF
         </button>
 
         <button
@@ -759,24 +775,6 @@ function SplitButton({ items, workspaceId, currentFileId, splitFileId, onOpenSpl
     return () => document.removeEventListener('mousedown', handle);
   }, [open]);
 
-  const others = useMemo(() => {
-    const byId = new Map(items.map(it => [it.id, it]));
-    function descendant(id) {
-      if (!workspaceId) return true;
-      let cur = id;
-      while (cur) {
-        if (cur === workspaceId) return true;
-        const f = byId.get(cur);
-        if (!f) return false;
-        cur = f.parent;
-      }
-      return false;
-    }
-    return items
-      .filter(it => it.type === 'file' && it.id !== currentFileId && descendant(it.parent))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [items, currentFileId, workspaceId]);
-
   if (splitFileId) {
     return (
       <button className="btn ghost split-active" onClick={onCloseSplit} title="분할 닫기">
@@ -793,19 +791,12 @@ function SplitButton({ items, workspaceId, currentFileId, splitFileId, onOpenSpl
       {open && (
         <div className="split-picker-menu">
           <div className="ref-picker-title">참조할 파일 선택</div>
-          {others.length === 0 && (
-            <div className="ref-picker-empty">작업 폴더에 다른 파일이 없습니다.</div>
-          )}
-          {others.map(f => (
-            <button
-              key={f.id}
-              className="ref-picker-item"
-              onClick={() => { onOpenSplit(f.id); setOpen(false); }}
-            >
-              <Icon name="file" size={13}/>
-              <span className="ref-picker-name">{f.name || '제목 없음'}</span>
-            </button>
-          ))}
+          <FilePicker
+            items={items}
+            workspaceId={workspaceId}
+            currentFileId={currentFileId}
+            onPick={(id) => { onOpenSplit(id); setOpen(false); }}
+          />
         </div>
       )}
     </div>

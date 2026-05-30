@@ -1,28 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import Icon from './Icon.jsx';
+import FilePicker from './FilePicker.jsx';
 
 export default function ReferencePane({ file, onClose, onSwap, onChangeFile, items, workspaceId, splitWidth }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-
-  const others = useMemo(() => {
-    function descendant(id) {
-      if (!workspaceId) return true;
-      let cur = id;
-      while (cur) {
-        if (cur === workspaceId) return true;
-        const f = items.find(x => x.id === cur);
-        if (!f) return false;
-        cur = f.parent;
-      }
-      return false;
-    }
-    return items
-      .filter(it => it.type === 'file' && it.id !== file.id && descendant(it.parent))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [items, workspaceId, file.id]);
 
   return (
     <aside className="ref-pane" style={{ width: splitWidth }}>
@@ -51,19 +35,12 @@ export default function ReferencePane({ file, onClose, onSwap, onChangeFile, ite
             <div className="ref-picker-scrim" onClick={() => setPickerOpen(false)}></div>
             <div className="ref-picker">
               <div className="ref-picker-title">참조 파일 바꾸기</div>
-              {others.length === 0 && (
-                <div className="ref-picker-empty">작업 폴더에 다른 파일이 없습니다.</div>
-              )}
-              {others.map(f => (
-                <button
-                  key={f.id}
-                  className="ref-picker-item"
-                  onClick={() => { onChangeFile(f.id); setPickerOpen(false); }}
-                >
-                  <Icon name="file" size={13}/>
-                  <span className="ref-picker-name">{f.name || '제목 없음'}</span>
-                </button>
-              ))}
+              <FilePicker
+                items={items}
+                workspaceId={workspaceId}
+                currentFileId={file.id}
+                onPick={(id) => { onChangeFile(id); setPickerOpen(false); }}
+              />
             </div>
           </>
         )}

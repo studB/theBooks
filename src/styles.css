@@ -12,6 +12,7 @@ button { font-family: inherit; }
 .app {
   display: grid;
   grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   background: var(--gray-50);
   color: var(--fg-primary);
@@ -604,6 +605,7 @@ button { font-family: inherit; }
 /* Table */
 .bucket-table {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   background: var(--white);
 }
@@ -712,10 +714,10 @@ button { font-family: inherit; }
 /* ============== Editor ============== */
 .editor-wrap {
   flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: 24px 1fr;
-  min-height: 0;
+  grid-template-rows: 24px minmax(0, 1fr);
   background: var(--gray-50);
 }
 .ruler-h {
@@ -1497,6 +1499,41 @@ button { font-family: inherit; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Folder drill-down picker header */
+.file-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.file-picker-up {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.file-picker-up:hover { background: var(--gray-100); color: var(--fg-primary); }
+.file-picker-cur {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--text-xs);
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+.file-picker-cur svg { flex: 0 0 auto; color: var(--fg-muted); }
 
 /* Split divider */
 .split-divider {

@@ -58,6 +58,7 @@ export default function Editor({
   onRefreshGit,
   analysisOpen,
   onToggleAnalysis,
+  onSyncFromDisk,
 }) {
   const [title, setTitle] = useState(file.name || '');
   const [margins, setMargins] = useState(file.margins || { left: 2.5, right: 2.5, top: 2.5, bottom: 2.5 });
@@ -105,6 +106,10 @@ export default function Editor({
   const findInputRef = useRef(null);
   const findTimerRef = useRef(null);
   const matchRangesRef = useRef([]);
+
+  // 디스크에서 다시 불러오기
+  const [reloadConflict, setReloadConflict] = useState(false);
+  const [reloadError, setReloadError] = useState('');
 
   const recompute = useCallback(() => {
     if (!pageRef.current || !rulerHRef.current) return;
@@ -308,6 +313,68 @@ export default function Editor({
   }, [file.id]);
 
   useEffect(() => () => clearFindHighlights(), [clearFindHighlights]);
+
+  // --- 디스크에서 다시 불러오기 ---------------------------------------------
+  const applyDiskData = useCallback((data) => {
+    const body = data.content || '';
+    contentRef.current = body;
+    if (editableRef.current) editableRef.current.innerText = body;
+    // title/margins 변경이 autosave를 트리거하지 않도록 (file.id 전환과 동일 패턴)
+    touchedRef.current = false;
+    setTitle(data.title || file.name || '');
+    if (data.margins) setMargins(data.margins);
+    setSavedAt(data.updatedAt);
+    setDirty(false);
+    setCounts(computeCounts(body));
+    if (onSyncFromDisk) {
+      onSyncFromDisk({ content: body, margins: data.margins, updatedAt: data.updatedAt });
+    }
+  }, [file.name, onSyncFromDisk]);
+
+  const reloadFromDisk = useCallback(async () => {
+    setReloadError('');
+    try {
+      const data = await invoke('read_file', { relPath: file.id });
+      applyDiskData(data);
+    } catch (e) {
+      setReloadError(e?.message || (typeof e === 'string' ? e : '다시 불러오기에 실패했습니다.'));
+    }
+  }, [file.id, applyDiskData]);
+
+  function hasUnsavedChanges() {
+    // autosave OFF: dirty 플래그, autosave ON: 아직 기록 안 된 보류 저장(saveTimer)
+    return dirty || !!saveTimer.current;
+  }
+
+  function requestReload() {
+    if (saving && autosaveRef.current) {
+      // 진행 중인 저장이 있으면 보수적으로 확인 배너
+      setReloadConflict(true);
+      return;
+    }
+    if (hasUnsavedChanges()) {
+      setReloadConflict(true);
+    } else {
+      reloadFromDisk();
+    }
+  }
+
+  function confirmReload() {
+    setReloadConflict(false);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      savingRef.current = false;
+      setSaving(false);
+    }
+    reloadFromDisk();
+  }
+
+  // 파일이 바뀌면 배너/에러 정리
+  useEffect(() => {
+    setReloadConflict(false);
+    setReloadError('');
+  }, [file.id]);
 
   function applyContentFromDOM() {
     if (composingRef.current) return;
@@ -548,6 +615,15 @@ export default function Editor({
 
           <button
             type="button"
+            className="btn ghost"
+            onClick={requestReload}
+            title="디스크에서 다시 불러오기 — 외부에서 변경된 파일 내용을 반영"
+          >
+            <Icon name="refresh" size={13}/>다시 불러오기
+          </button>
+
+          <button
+            type="button"
             className={`autosave-toggle ${autosave ? 'on' : 'off'}`}
             onClick={toggleAutosave}
             title={autosave ? '자동저장 켜짐 — 변경 시 자동으로 저장됩니다' : '자동저장 꺼짐 — 저장 버튼으로만 저장됩니다'}
@@ -577,6 +653,23 @@ export default function Editor({
           </button>
         </div>
       </div>
+
+      {reloadConflict && (
+        <div className="reload-banner reload-banner--warn">
+          <Icon name="refresh" size={13} />
+          <span className="reload-banner-msg">
+            저장하지 않은 변경이 있습니다. 디스크 내용으로 다시 불러오면 현재 변경 사항이 사라집니다.
+          </span>
+          <button className="btn ghost" onClick={() => setReloadConflict(false)}>취소</button>
+          <button className="btn primary urgent" onClick={confirmReload}>디스크 내용으로 덮어쓰기</button>
+        </div>
+      )}
+      {reloadError && (
+        <div className="reload-banner reload-banner--error">
+          <span className="reload-banner-msg">다시 불러오기 실패: {reloadError}</span>
+          <button className="btn ghost" onClick={() => setReloadError('')}>닫기</button>
+        </div>
+      )}
 
       {gitStatus && gitStatus.available && (
         <GitEditorBar

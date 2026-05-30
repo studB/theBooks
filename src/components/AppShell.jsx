@@ -518,6 +518,14 @@ export default function AppShell() {
             onRefreshGit={refreshGit}
             analysisOpen={analysisOpen}
             onToggleAnalysis={() => setAnalysisOpen(o => !o)}
+            onSyncFromDisk={(data) => setItems(its => its.map(it => it.id === openFile.id
+              ? {
+                  ...it,
+                  content: data.content,
+                  ...(data.margins ? { margins: data.margins } : {}),
+                  ...(data.updatedAt != null ? { updatedAt: data.updatedAt } : {}),
+                }
+              : it))}
           />
           {analysisOpen && (
             <AnalysisPanel file={openFile} onClose={() => setAnalysisOpen(false)} />

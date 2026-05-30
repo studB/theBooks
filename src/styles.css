@@ -777,6 +777,31 @@ button { font-family: inherit; }
   pointer-events: none;
 }
 
+/* 디스크에서 다시 불러오기 배너 */
+.reload-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.reload-banner .reload-banner-msg {
+  flex: 1;
+  min-width: 0;
+}
+.reload-banner--warn {
+  background: #fff7e6;
+  color: #8a5a00;
+}
+.reload-banner--error {
+  background: #fdecec;
+  color: #9b1c1c;
+}
+.reload-banner .btn {
+  flex: 0 0 auto;
+}
+
 /* 찾기 하이라이트 (CSS Custom Highlight API — DOM 비파괴) */
 ::highlight(tb-find) {
   background-color: rgba(255, 213, 0, 0.4);

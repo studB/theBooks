@@ -350,84 +350,88 @@ export default function Editor({
   return (
     <main className="main">
       <div className="topbar">
-        <button className="topbar-back" onClick={onExit}>
-          <Icon name="arrowLeft" size={14}/> 목록
-        </button>
-        <div className="divider-v"></div>
+        <div className="topbar-left">
+          <button className="topbar-back" onClick={onExit}>
+            <Icon name="arrowLeft" size={14}/> 목록
+          </button>
+          <div className="divider-v"></div>
 
-        <div className="editor-path">
-          {breadcrumb.map((b, i) => (
-            <React.Fragment key={i}>
-              <span className="editor-path-seg">{b}</span>
-              {i < breadcrumb.length - 1 && <span className="editor-path-sep">/</span>}
-            </React.Fragment>
-          ))}
-          {breadcrumb.length > 0 && <span className="editor-path-sep">/</span>}
+          <div className="editor-path">
+            {breadcrumb.map((b, i) => (
+              <React.Fragment key={i}>
+                <span className="editor-path-seg">{b}</span>
+                {i < breadcrumb.length - 1 && <span className="editor-path-sep">/</span>}
+              </React.Fragment>
+            ))}
+            {breadcrumb.length > 0 && <span className="editor-path-sep">/</span>}
+          </div>
+
+          <input
+            className="topbar-title"
+            value={title}
+            placeholder="제목 없음"
+            onChange={(e) => { setTitle(e.target.value); markDirtyIfOff(); }}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+              if (e.key === 'Escape') { setTitle(file.name || ''); e.currentTarget.blur(); }
+            }}
+          />
         </div>
 
-        <input
-          className="topbar-title"
-          value={title}
-          placeholder="제목 없음"
-          onChange={(e) => { setTitle(e.target.value); markDirtyIfOff(); }}
-          onBlur={commitTitle}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
-            if (e.key === 'Escape') { setTitle(file.name || ''); e.currentTarget.blur(); }
-          }}
-        />
+        <div className="topbar-middle">
+          <FormatControls fmt={fmt} onChange={setFmt} />
 
-        <FormatControls fmt={fmt} onChange={setFmt} />
+          <CharCountBadge counts={counts} />
 
-        <CharCountBadge counts={counts} />
+          <button
+            type="button"
+            className={`btn ghost ${analysisOpen ? 'is-active' : ''}`}
+            onClick={onToggleAnalysis}
+            title={analysisOpen ? '분석 패널 닫기' : '본문 분석'}
+          >
+            <Icon name="sparkles" size={13}/>분석
+          </button>
 
-        <div className="topbar-spacer"></div>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={handleExportPdf}
+            title="PDF로 내보내기"
+          >
+            <Icon name="download" size={13}/>PDF
+          </button>
 
-        <button
-          type="button"
-          className={`btn ghost ${analysisOpen ? 'is-active' : ''}`}
-          onClick={onToggleAnalysis}
-          title={analysisOpen ? '분석 패널 닫기' : '본문 분석'}
-        >
-          <Icon name="sparkles" size={13}/>분석
-        </button>
+          <button
+            type="button"
+            className={`autosave-toggle ${autosave ? 'on' : 'off'}`}
+            onClick={toggleAutosave}
+            title={autosave ? '자동저장 켜짐 — 변경 시 자동으로 저장됩니다' : '자동저장 꺼짐 — 저장 버튼으로만 저장됩니다'}
+          >
+            <span className="autosave-dot"></span>
+            자동저장 {autosave ? 'ON' : 'OFF'}
+          </button>
 
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={handleExportPdf}
-          title="PDF로 내보내기"
-        >
-          <Icon name="download" size={13}/>PDF
-        </button>
+          <SaveStatus saving={saving} dirty={showUnsaved} savedAt={savedAt} />
+        </div>
 
-        <button
-          type="button"
-          className={`autosave-toggle ${autosave ? 'on' : 'off'}`}
-          onClick={toggleAutosave}
-          title={autosave ? '자동저장 켜짐 — 변경 시 자동으로 저장됩니다' : '자동저장 꺼짐 — 저장 버튼으로만 저장됩니다'}
-        >
-          <span className="autosave-dot"></span>
-          자동저장 {autosave ? 'ON' : 'OFF'}
-        </button>
+        <div className="topbar-right">
+          <SplitButton
+            items={items}
+            workspaceId={workspaceId}
+            currentFileId={file.id}
+            splitFileId={splitFileId}
+            onOpenSplit={onOpenSplit}
+            onCloseSplit={onCloseSplit}
+          />
 
-        <SaveStatus saving={saving} dirty={showUnsaved} savedAt={savedAt} />
-
-        <SplitButton
-          items={items}
-          workspaceId={workspaceId}
-          currentFileId={file.id}
-          splitFileId={splitFileId}
-          onOpenSplit={onOpenSplit}
-          onCloseSplit={onCloseSplit}
-        />
-
-        <button
-          className={`btn primary ${showUnsaved ? 'urgent' : ''}`}
-          onClick={() => { if (!committingRef.current) manualSave(); }}
-        >
-          <Icon name="save" size={14}/>저장
-        </button>
+          <button
+            className={`btn primary ${showUnsaved ? 'urgent' : ''}`}
+            onClick={() => { if (!committingRef.current) manualSave(); }}
+          >
+            <Icon name="save" size={14}/>저장
+          </button>
+        </div>
       </div>
 
       {gitStatus && gitStatus.available && (

@@ -4,6 +4,7 @@ All notable changes to this project are recorded here. Newest entries on top.
 
 | Version | Date | Type | Summary |
 |---------|------|------|---------|
+| 0.19.0 | 2026-05-30 | fix | 에디터 topbar 좁은 폭에서 요소 겹침/잘림 해결 — flex-wrap으로 두 줄 줄바꿈, 좌/중/우 그룹 분리 |
 | 0.18.0 | 2026-05-30 | feat | 파일목록 서브툴바에 새로고침 버튼 추가 — 워크스페이스 파일과 git 상태 동시 갱신 |
 | 0.15.0 | 2026-05-25 | feat | 오른쪽 사이드 패널에 AI 채팅/터미널 탭 추가 (portable-pty + xterm.js), 패널 너비 드래그 조절 |
 | 0.14.2 | 2026-05-24 | fix | ReferencePane 마크다운 뷰어에서 단일 줄바꿈을 hard break로 보존 (remark-breaks) |

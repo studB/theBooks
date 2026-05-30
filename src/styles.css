@@ -377,14 +377,32 @@ button { font-family: inherit; }
 
 /* ============== Top bar (editor) ============== */
 .topbar {
-  height: 52px;
+  min-height: 52px;
   background: var(--white);
   border-bottom: 1px solid var(--gray-100);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  padding: 0 16px;
-  gap: 12px;
+  padding: 8px 16px;
+  gap: 8px 12px;
   flex: 0 0 auto;
+}
+.topbar-left,
+.topbar-middle,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.topbar-left { flex: 0 1 auto; }
+.topbar-middle {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+.topbar-right {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .topbar-back {
   height: 32px;
@@ -414,7 +432,7 @@ button { font-family: inherit; }
 }
 .topbar-title:focus { background: var(--gray-50); border-radius: 4px; padding: 2px 6px; margin: -2px -6px; }
 
-.topbar-spacer { flex: 1; }
+.topbar-spacer { display: none; }
 
 .char-count-badge {
   display: inline-flex;

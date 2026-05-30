@@ -565,6 +565,7 @@ export default function AppShell() {
           gitStatus={gitStatus}
           gitLoading={gitLoading}
           onRefreshGit={refreshGit}
+          onRefresh={() => { refresh(); refreshGit(); }}
         />
       )}
 

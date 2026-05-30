@@ -63,6 +63,7 @@ export default function FileList({
   onNewFile, onNewFolder, onDelete, onRename,
   syncing, syncMessage, onSync,
   gitStatus, gitLoading, onRefreshGit,
+  onRefresh,
 }) {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('updated');
@@ -179,6 +180,16 @@ export default function FileList({
             >
               <Icon name="arrowLeft" size={14}/>
             </button>
+            {onRefresh && (
+              <button
+                className="bucket-up"
+                onClick={onRefresh}
+                title="새로고침"
+                disabled={!!gitLoading}
+              >
+                <Icon name="refresh" size={14}/>
+              </button>
+            )}
             <div className="search-box">
               <Icon name="search" size={14}/>
               <input

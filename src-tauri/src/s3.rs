@@ -202,7 +202,7 @@ pub async fn sync_workspace(app: AppHandle) -> Result<SyncResult, FsError> {
     let s3 = cfg
         .s3_workspace
         .as_ref()
-        .ok_or_else(|| FsError::NoWorkspace)?
+        .ok_or(FsError::NoWorkspace)?
         .clone();
     let root: PathBuf = s3_cache_root(&app, &s3)?;
     let prefix = normalize_prefix(&s3.prefix);

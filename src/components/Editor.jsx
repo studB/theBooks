@@ -72,18 +72,21 @@ export default function Editor({
 
   const autosaveRef = useRef(autosave);
   autosaveRef.current = autosave;
-  const contentRef = useRef(file.content || '');
+  const contentRef = useRef((file.content || '').replace(/\r/g, ''));
   const composingRef = useRef(false);
   const savingRef = useRef(false);
   const committingRef = useRef(false);
   const touchedRef = useRef(false);
-  const [counts, setCounts] = useState(() => computeCounts(file.content || ''));
+  const [counts, setCounts] = useState(() => computeCounts((file.content || '').replace(/\r/g, '')));
   const countsTimerRef = useRef(null);
   const scheduleCountsUpdate = useCallback(() => {
     if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
     countsTimerRef.current = setTimeout(() => {
+      if (editableRef.current) {
+        contentRef.current = editableRef.current.innerText.replace(/\r/g, '');
+      }
       setCounts(computeCounts(contentRef.current || ''));
-    }, 150);
+    }, 400);
   }, []);
   useEffect(() => () => {
     if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
@@ -159,7 +162,7 @@ export default function Editor({
         setSaving(false);
         return;
       }
-      const latest = editableRef.current ? editableRef.current.innerText : contentRef.current;
+      const latest = editableRef.current ? editableRef.current.innerText.replace(/\r/g, '') : contentRef.current;
       contentRef.current = latest;
       onChange({ name: title, content: latest, margins });
       setSavedAt(Date.now());
@@ -320,7 +323,7 @@ export default function Editor({
 
   // --- 디스크에서 다시 불러오기 ---------------------------------------------
   const applyDiskData = useCallback((data) => {
-    const body = data.content || '';
+    const body = (data.content || '').replace(/\r/g, '');
     contentRef.current = body;
     if (editableRef.current) editableRef.current.innerText = body;
     // title/margins 변경이 autosave를 트리거하지 않도록 (file.id 전환과 동일 패턴)
@@ -384,7 +387,6 @@ export default function Editor({
   function applyContentFromDOM() {
     if (composingRef.current) return;
     if (!editableRef.current) return;
-    contentRef.current = editableRef.current.innerText;
     scheduleCountsUpdate();
     if (autosaveRef.current) {
       scheduleAutosave();
@@ -459,7 +461,7 @@ export default function Editor({
   }), [fmt]);
 
   function manualSave() {
-    const latest = editableRef.current ? editableRef.current.innerText : contentRef.current;
+    const latest = editableRef.current ? editableRef.current.innerText.replace(/\r/g, '') : contentRef.current;
     contentRef.current = latest;
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -494,7 +496,7 @@ export default function Editor({
 
   async function handleExportPdf() {
     if (exporting) return;
-    const content = editableRef.current ? editableRef.current.innerText : (contentRef.current || file.content || '');
+    const content = editableRef.current ? editableRef.current.innerText.replace(/\r/g, '') : (contentRef.current || (file.content || '').replace(/\r/g, ''));
     setPdfMsg(null);
     setExporting(true);
     try {
@@ -512,7 +514,7 @@ export default function Editor({
   function toggleAutosave() {
     const next = !autosave;
     if (next && editableRef.current) {
-      contentRef.current = editableRef.current.innerText;
+      contentRef.current = editableRef.current.innerText.replace(/\r/g, '');
     }
     if (!next && saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -915,8 +917,14 @@ const CHAR_NF = new Intl.NumberFormat('ko-KR');
 
 function computeCounts(text) {
   const t = text || '';
-  const total = Array.from(t).length;
-  const noSpace = Array.from(t.replace(/\s+/g, '')).length;
+  let total = 0;
+  let noSpace = 0;
+  for (const char of t) {
+    total++;
+    if (char !== ' ' && char !== '\n' && char !== '\r' && char !== '\t') {
+      noSpace++;
+    }
+  }
   return { total, noSpace };
 }
 

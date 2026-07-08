@@ -44,7 +44,7 @@ impl Default for Margins {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct FileFrontmatter {
     #[serde(default)]
@@ -211,15 +211,7 @@ fn parse_frontmatter(raw: &str) -> (FileFrontmatter, String) {
     }
 }
 
-impl Default for FileFrontmatter {
-    fn default() -> Self {
-        FileFrontmatter {
-            title: None,
-            margins: None,
-            created_at: None,
-        }
-    }
-}
+
 
 fn write_md(path: &Path, title: &str, margins: &Margins, created_at: i64, body: &str) -> Result<(), FsError> {
     let fm = FileFrontmatter {
@@ -287,7 +279,7 @@ fn collect_items(root: &Path, dir: &Path, out: &mut Vec<Item>) -> Result<(), FsE
                 None => continue,
             };
             let (title, margins, created_at) = if is_md(&raw_name) {
-                let raw = retry_eintr(|| fs::read_to_string(&path)).unwrap_or_default();
+                let raw = retry_eintr(|| fs::read_to_string(&path)).unwrap_or_default().replace("\r\n", "\n");
                 let (fm, _) = parse_frontmatter(&raw);
                 let stem = path
                     .file_stem()
@@ -346,9 +338,10 @@ pub fn read_file(app: AppHandle, rel_path: String) -> Result<FileContent, FsErro
         .unwrap_or("")
         .to_string();
     let bytes = fs::read(&full)?;
-    let raw = String::from_utf8(bytes).map_err(|_| {
+    let mut raw = String::from_utf8(bytes).map_err(|_| {
         FsError::Binary(format!("이 파일은 텍스트로 열 수 없습니다: {file_name}"))
     })?;
+    raw = raw.replace("\r\n", "\n");
     let stem = full
         .file_stem()
         .and_then(|s| s.to_str())
@@ -558,7 +551,7 @@ pub fn rename_item(app: AppHandle, args: RenameArgs) -> Result<RenamedItem, FsEr
             .unwrap_or("")
             .to_string();
         if is_md(&new_file_name) {
-            let raw = fs::read_to_string(&new_full).unwrap_or_default();
+            let raw = fs::read_to_string(&new_full).unwrap_or_default().replace("\r\n", "\n");
             let (fm, body) = parse_frontmatter(&raw);
             let margins = fm.margins.unwrap_or_default();
             let created_at = fm.created_at.unwrap_or_else(|| ctime_ms(&new_full));
@@ -666,9 +659,9 @@ pub fn migrate_from_local(app: AppHandle, args: MigrateArgs) -> Result<MigrateRe
     let by_id: std::collections::HashMap<String, &LegacyItem> =
         args.items.iter().map(|it| (it.id.clone(), it)).collect();
 
-    fn rel_for<'a>(
+    fn rel_for(
         id: &str,
-        items: &std::collections::HashMap<String, &'a LegacyItem>,
+        items: &std::collections::HashMap<String, &LegacyItem>,
         workspace_id: &Option<String>,
         stack: &mut Vec<String>,
     ) -> Option<String> {

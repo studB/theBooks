@@ -83,7 +83,7 @@ export default function Editor({
     if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
     countsTimerRef.current = setTimeout(() => {
       if (editableRef.current) {
-        contentRef.current = editableRef.current.innerText.replace(/\r/g, '');
+        contentRef.current = (editableRef.current.textContent || '').replace(/\r/g, '');
       }
       setCounts(computeCounts(contentRef.current || ''));
     }, 400);
@@ -139,7 +139,6 @@ export default function Editor({
   useEffect(() => {
     const ro = new ResizeObserver(scheduleRecompute);
     if (scrollRef.current) ro.observe(scrollRef.current);
-    if (pageRef.current) ro.observe(pageRef.current);
     window.addEventListener('resize', scheduleRecompute);
     return () => {
       ro.disconnect();
@@ -325,7 +324,7 @@ export default function Editor({
   const applyDiskData = useCallback((data) => {
     const body = (data.content || '').replace(/\r/g, '');
     contentRef.current = body;
-    if (editableRef.current) editableRef.current.innerText = body;
+    if (editableRef.current) editableRef.current.textContent = body;
     // title/margins 변경이 autosave를 트리거하지 않도록 (file.id 전환과 동일 패턴)
     touchedRef.current = false;
     setTitle(data.title || file.name || '');
@@ -398,13 +397,6 @@ export default function Editor({
   function handleCompositionStart() {
     composingRef.current = true;
   }
-  function handleCompositionUpdate() {
-    // IME 조합 중간 단계의 페인트가 다음 키까지 보류되는 환경(WebKitGTK/WSLg 등)에서
-    // 한 글자가 한 템포 늦게 보이는 현상을 줄이는 안전 장치.
-    // setState 없이 layout만 한 번 강제로 읽어 페인트 큐가 진행되도록 유도.
-    if (!editableRef.current) return;
-    void editableRef.current.offsetHeight;
-  }
   function handleCompositionEnd() {
     composingRef.current = false;
     applyContentFromDOM();
@@ -412,7 +404,7 @@ export default function Editor({
 
   useEffect(() => {
     if (editableRef.current) {
-      editableRef.current.innerText = contentRef.current;
+      editableRef.current.textContent = contentRef.current;
     }
     setDirty(false);
     touchedRef.current = false;
@@ -525,6 +517,21 @@ export default function Editor({
     setAutosave(next);
     writeAutosavePref(next);
     setDirty(false);
+  }
+
+  function compressNewlines() {
+    if (!editableRef.current) return;
+    const text = editableRef.current.innerText.replace(/\r/g, '');
+    const compressed = text.replace(/\n{2,}/g, (m) => m.slice(1));
+    if (text === compressed) return;
+    contentRef.current = compressed;
+    editableRef.current.textContent = compressed;
+    setCounts(computeCounts(compressed));
+    if (autosaveRef.current) {
+      scheduleAutosave();
+    } else {
+      setDirty(true);
+    }
   }
 
   const hTicks = useMemo(() => {
@@ -644,6 +651,15 @@ export default function Editor({
 
           <button
             type="button"
+            className="btn ghost"
+            onClick={compressNewlines}
+            title="연속된 줄바꿈을 1줄씩 줄입니다 (3줄→2줄, 2줄→1줄)"
+          >
+            <Icon name="compressLines" size={13}/>줄바꿈 압축
+          </button>
+
+          <button
+            type="button"
             className={`autosave-toggle ${autosave ? 'on' : 'off'}`}
             onClick={toggleAutosave}
             title={autosave ? '자동저장 켜짐 — 변경 시 자동으로 저장됩니다' : '자동저장 꺼짐 — 저장 버튼으로만 저장됩니다'}
@@ -739,7 +755,6 @@ export default function Editor({
               pageRef={pageRef}
               onInput={applyContentFromDOM}
               onCompositionStart={handleCompositionStart}
-              onCompositionUpdate={handleCompositionUpdate}
               onCompositionEnd={handleCompositionEnd}
               editorVars={editorVars}
             />
@@ -958,7 +973,7 @@ function SaveStatus({ saving, dirty, savedAt }) {
   );
 }
 
-function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionUpdate, onCompositionEnd, editorVars }) {
+function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionEnd, editorVars }) {
   return (
     <div className="page-stack" ref={pageRef}>
       <div className="page-sheet">
@@ -977,7 +992,6 @@ function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart,
         }}
         onInput={onInput}
         onCompositionStart={onCompositionStart}
-        onCompositionUpdate={onCompositionUpdate}
         onCompositionEnd={onCompositionEnd}
       />
     </div>

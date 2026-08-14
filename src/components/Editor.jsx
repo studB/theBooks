@@ -9,6 +9,19 @@ const PX_PER_CM = 37.795;
 const PAGE_W_CM = 21;
 const PAGE_H_CM = 29.7;
 const AUTOSAVE_KEY = 'thebooks.autosave';
+const EPISODE_MARKER = '<!-- thebooks:episode -->';
+
+function parseEpisodeDocument(raw) {
+  const text = (raw || '').replace(/\r/g, '');
+  if (!text.includes(EPISODE_MARKER)) return { enabled: false, episodes: [text] };
+  const parts = text.split(EPISODE_MARKER);
+  if (!parts[0].trim()) parts.shift();
+  return { enabled: true, episodes: parts.map(part => part.replace(/^\n/, '').replace(/\n$/, '')) };
+}
+
+function serializeEpisodes(episodes) {
+  return episodes.map(episode => `${EPISODE_MARKER}\n${episode || ''}`).join('\n');
+}
 
 const DEFAULT_FMT = {
   fontFamily: 'system',
@@ -67,17 +80,23 @@ export default function Editor({
   const [dirty, setDirty] = useState(false);
   const [autosave, setAutosave] = useState(readAutosavePref);
   const [fmt, setFmt] = useState(DEFAULT_FMT);
+  const initialEpisodes = useMemo(() => parseEpisodeDocument(file.content || ''), [file.content]);
+  const [episodeMode, setEpisodeMode] = useState(initialEpisodes.enabled);
+  // 전체 회차 본문은 렌더링 상태로 두지 않는다. 화면에는 currentEpisode만 DOM으로 유지한다.
+  const episodesRef = useRef(initialEpisodes.episodes);
+  const [episodeCount, setEpisodeCount] = useState(initialEpisodes.episodes.length);
+  const [currentEpisode, setCurrentEpisode] = useState(0);
   const fmtTouchedRef = useRef(false);
   const fmtTimerRef = useRef(null);
 
   const autosaveRef = useRef(autosave);
   autosaveRef.current = autosave;
-  const contentRef = useRef((file.content || '').replace(/\r/g, ''));
+  const contentRef = useRef(initialEpisodes.episodes[0] || '');
   const composingRef = useRef(false);
   const savingRef = useRef(false);
   const committingRef = useRef(false);
   const touchedRef = useRef(false);
-  const [counts, setCounts] = useState(() => computeCounts((file.content || '').replace(/\r/g, '')));
+  const [counts, setCounts] = useState(() => computeCounts(initialEpisodes.episodes[0] || ''));
   const countsTimerRef = useRef(null);
   const scheduleCountsUpdate = useCallback(() => {
     if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
@@ -88,6 +107,19 @@ export default function Editor({
       setCounts(computeCounts(contentRef.current || ''));
     }, 400);
   }, []);
+
+  const syncEpisodeFromDOM = useCallback(() => {
+    const latest = editableRef.current
+      ? editableRef.current.innerText.replace(/\r/g, '')
+      : (contentRef.current || '');
+    contentRef.current = latest;
+    episodesRef.current[currentEpisode] = latest;
+    return latest;
+  }, [currentEpisode]);
+
+  const documentContent = useCallback((mode = episodeMode, list = episodesRef.current) => (
+    mode ? serializeEpisodes(list) : (list[0] || '')
+  ), [episodeMode]);
   useEffect(() => () => {
     if (countsTimerRef.current) clearTimeout(countsTimerRef.current);
   }, []);
@@ -161,9 +193,8 @@ export default function Editor({
         setSaving(false);
         return;
       }
-      const latest = editableRef.current ? editableRef.current.innerText.replace(/\r/g, '') : contentRef.current;
-      contentRef.current = latest;
-      onChange({ name: title, content: latest, margins });
+      const latest = syncEpisodeFromDOM();
+      onChange({ name: title, content: documentContent(), margins });
       setSavedAt(Date.now());
       savingRef.current = false;
       setSaving(false);
@@ -322,7 +353,12 @@ export default function Editor({
 
   // --- 디스크에서 다시 불러오기 ---------------------------------------------
   const applyDiskData = useCallback((data) => {
-    const body = (data.content || '').replace(/\r/g, '');
+    const parsed = parseEpisodeDocument(data.content || '');
+    const body = parsed.episodes[0] || '';
+    setEpisodeMode(parsed.enabled);
+    episodesRef.current = parsed.episodes;
+    setEpisodeCount(parsed.episodes.length);
+    setCurrentEpisode(0);
     contentRef.current = body;
     if (editableRef.current) editableRef.current.textContent = body;
     // title/margins 변경이 autosave를 트리거하지 않도록 (file.id 전환과 동일 패턴)
@@ -404,12 +440,12 @@ export default function Editor({
 
   useEffect(() => {
     if (editableRef.current) {
-      editableRef.current.textContent = contentRef.current;
+      editableRef.current.textContent = episodesRef.current[currentEpisode] || '';
     }
     setDirty(false);
     touchedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file.id]);
+  }, [file.id, episodeCount, currentEpisode]);
 
   useEffect(() => {
     fmtTouchedRef.current = false;
@@ -453,13 +489,12 @@ export default function Editor({
   }), [fmt]);
 
   function manualSave() {
-    const latest = editableRef.current ? editableRef.current.innerText.replace(/\r/g, '') : contentRef.current;
-    contentRef.current = latest;
+    const latest = syncEpisodeFromDOM();
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const p = onSaveNow({ name: title, content: latest, margins });
+    const p = onSaveNow({ name: title, content: documentContent(), margins });
     setSavedAt(Date.now());
     savingRef.current = false;
     setSaving(false);
@@ -517,6 +552,50 @@ export default function Editor({
     setAutosave(next);
     writeAutosavePref(next);
     setDirty(false);
+  }
+
+  function changeEpisode(next) {
+    if (!episodeMode || next < 0 || next >= episodeCount || next === currentEpisode) return;
+    syncEpisodeFromDOM();
+    setCurrentEpisode(next);
+    contentRef.current = episodesRef.current[next] || '';
+    if (editableRef.current) editableRef.current.textContent = episodesRef.current[next] || '';
+    setCounts(computeCounts(episodesRef.current[next] || ''));
+  }
+
+  function toggleEpisodeMode() {
+    const latest = syncEpisodeFromDOM();
+    if (episodeMode) {
+      episodesRef.current = episodesRef.current.map((episode, index) => index === currentEpisode ? latest : episode);
+      const flattened = episodesRef.current.join('\n\n');
+      episodesRef.current = [flattened];
+      setEpisodeCount(1);
+      setEpisodeMode(false);
+      setCurrentEpisode(0);
+      contentRef.current = flattened;
+      if (editableRef.current) editableRef.current.textContent = flattened;
+      onChange({ name: title, content: flattened, margins });
+      return;
+    }
+    const nextEpisodes = [latest];
+    episodesRef.current = nextEpisodes;
+    setEpisodeCount(1);
+    setEpisodeMode(true);
+    setCurrentEpisode(0);
+    onChange({ name: title, content: serializeEpisodes(nextEpisodes), margins });
+  }
+
+  function addEpisode() {
+    if (!episodeMode) return;
+    const latest = syncEpisodeFromDOM();
+    episodesRef.current = episodesRef.current.map((episode, index) => index === currentEpisode ? latest : episode).concat('');
+    const nextEpisodes = episodesRef.current;
+    setEpisodeCount(nextEpisodes.length);
+    setCurrentEpisode(nextEpisodes.length - 1);
+    contentRef.current = '';
+    if (editableRef.current) editableRef.current.textContent = '';
+    setCounts(computeCounts(''));
+    onChange({ name: title, content: serializeEpisodes(nextEpisodes), margins });
   }
 
   function compressNewlines() {
@@ -620,6 +699,22 @@ export default function Editor({
           <FormatControls fmt={fmt} onChange={setFmt} />
 
           <CharCountBadge counts={counts} />
+
+          <div className="episode-controls" title="한 파일 안에서 회차별로 편집합니다">
+            <button
+              type="button"
+              className={`btn ghost episode-mode-toggle ${episodeMode ? 'is-active' : ''}`}
+              onClick={toggleEpisodeMode}
+            >{episodeMode ? '회차 편집 ON' : '회차 편집'}</button>
+            {episodeMode && (
+              <>
+                <button type="button" className="episode-nav" onClick={() => changeEpisode(currentEpisode - 1)} disabled={currentEpisode === 0} aria-label="이전 회차">‹</button>
+                <span className="episode-index">{currentEpisode + 1} / {episodeCount}회</span>
+                <button type="button" className="episode-nav" onClick={() => changeEpisode(currentEpisode + 1)} disabled={currentEpisode === episodeCount - 1} aria-label="다음 회차">›</button>
+                <button type="button" className="btn ghost episode-add" onClick={addEpisode}>+ 회차</button>
+              </>
+            )}
+          </div>
 
           <button
             type="button"

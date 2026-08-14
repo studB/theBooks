@@ -450,6 +450,34 @@ button { font-family: inherit; }
 .char-count-sep { color: var(--gray-300); }
 .char-count-nospace { color: var(--fg-muted); }
 
+.episode-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--gray-200);
+  white-space: nowrap;
+}
+.episode-mode-toggle.is-active {
+  color: var(--primary-600);
+  background: var(--primary-50, #f1f5ff);
+}
+.episode-nav {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--gray-200);
+  border-radius: 5px;
+  background: var(--white);
+  color: var(--fg-secondary);
+  font-size: 18px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.episode-nav:hover:not(:disabled) { background: var(--gray-50); color: var(--fg-primary); }
+.episode-nav:disabled { opacity: 0.35; cursor: default; }
+.episode-index { min-width: 54px; text-align: center; color: var(--fg-secondary); font-size: 11px; }
+.episode-add { margin-left: 2px; }
+
 .save-status {
   font: var(--caption);
   color: var(--fg-muted);

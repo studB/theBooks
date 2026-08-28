@@ -53,6 +53,28 @@ function writeAutosavePref(on) {
   try { localStorage.setItem(AUTOSAVE_KEY, on ? 'on' : 'off'); } catch {}
 }
 
+// Chromium/WebView2 represents Enter in a contentEditable differently per OS.
+// On Windows it can create block elements next to the plain text node installed
+// below with textContent.  Reading that mixed DOM with innerText then adds a
+// second newline at the block boundary.  Keep the editor DOM plain-text-only so
+// the text written to disk is independent of WebView2's editing markup.
+function insertPlainText(text) {
+  const normalized = (text || '').replace(/\r\n?/g, '\n');
+  if (document.execCommand('insertText', false, normalized)) return true;
+
+  const selection = window.getSelection();
+  if (!selection || !selection.rangeCount) return false;
+  const range = selection.getRangeAt(0);
+  range.deleteContents();
+  const node = document.createTextNode(normalized);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return false;
+}
+
 export default function Editor({
   file,
   breadcrumb,
@@ -428,6 +450,22 @@ export default function Editor({
     } else {
       setDirty(true);
     }
+  }
+
+  function handleBeforeInput(event) {
+    const inputType = event.nativeEvent?.inputType || event.inputType;
+    if (inputType !== 'insertParagraph' && inputType !== 'insertLineBreak') return;
+    event.preventDefault();
+    // execCommand preserves the native undo stack and emits an input event.
+    // The Range fallback does not emit one, so update the editor explicitly.
+    if (!insertPlainText('\n')) applyContentFromDOM();
+  }
+
+  function handlePaste(event) {
+    const text = event.clipboardData?.getData('text/plain');
+    if (typeof text !== 'string') return;
+    event.preventDefault();
+    if (!insertPlainText(text)) applyContentFromDOM();
   }
 
   function handleCompositionStart() {
@@ -849,6 +887,8 @@ export default function Editor({
               editableRef={editableRef}
               pageRef={pageRef}
               onInput={applyContentFromDOM}
+              onBeforeInput={handleBeforeInput}
+              onPaste={handlePaste}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
               editorVars={editorVars}
@@ -1068,7 +1108,7 @@ function SaveStatus({ saving, dirty, savedAt }) {
   );
 }
 
-function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart, onCompositionEnd, editorVars }) {
+function PageStack({ margins, editableRef, pageRef, onInput, onBeforeInput, onPaste, onCompositionStart, onCompositionEnd, editorVars }) {
   return (
     <div className="page-stack" ref={pageRef}>
       <div className="page-sheet">
@@ -1086,6 +1126,8 @@ function PageStack({ margins, editableRef, pageRef, onInput, onCompositionStart,
           ...editorVars,
         }}
         onInput={onInput}
+        onBeforeInput={onBeforeInput}
+        onPaste={onPaste}
         onCompositionStart={onCompositionStart}
         onCompositionEnd={onCompositionEnd}
       />
